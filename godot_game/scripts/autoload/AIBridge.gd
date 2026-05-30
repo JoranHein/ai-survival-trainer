@@ -81,7 +81,7 @@ func request_health(callback: Callable) -> void:
 		parsed["ok"] = result == HTTPRequest.RESULT_SUCCESS and response_code >= 200 and response_code < 300
 		parsed["provider_mode"] = PROVIDER_REMOTE_SERVER
 		parsed["source"] = "remote_server"
-		callback.call(parsed)
+		_safe_call_callback(callback, parsed)
 		http_request.queue_free()
 	)
 
@@ -127,7 +127,7 @@ func _request_ai(kind: String, payload: Dictionary, callback: Callable, enabled_
 
 	http_request.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
 		var response := _parse_remote_response(kind, payload, result, response_code, response_body)
-		callback.call(response)
+		_safe_call_callback(callback, response)
 		http_request.queue_free()
 	)
 
@@ -456,11 +456,9 @@ func _join_url(server_base_url: String, endpoint: String) -> String:
 
 
 func _call_callback_deferred(callback: Callable, result: Dictionary) -> void:
-	if is_inside_tree():
-		call_deferred("_invoke_callback", callback, result)
-	else:
+	_safe_call_callback(callback, result)
+
+
+func _safe_call_callback(callback: Callable, result: Dictionary) -> void:
+	if callback.is_valid():
 		callback.call(result)
-
-
-func _invoke_callback(callback: Callable, result: Dictionary) -> void:
-	callback.call(result)

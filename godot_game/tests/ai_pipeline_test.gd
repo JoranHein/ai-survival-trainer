@@ -23,6 +23,7 @@ func _run() -> void:
 	root.add_child(bridge)
 	bridge.force_provider_mode("local_stub")
 
+	await _test_bridge_health_and_raw_validation(bridge)
 	_test_memory_records_events()
 	_test_chronicle_validates_scribe_notes()
 	await _test_scribe_pipeline(bridge)
@@ -41,6 +42,28 @@ func _run() -> void:
 func _assert(condition: bool, message: String) -> void:
 	if not condition:
 		failures.append(message)
+
+
+func _test_bridge_health_and_raw_validation(bridge: AIBridge) -> void:
+	var health_state := {"done": false}
+	bridge.request_health(func(result: Dictionary) -> void:
+		_assert(result.get("ok", false), "local_stub health should be available without a server")
+		_assert(result.get("provider_mode", "") == "local_stub", "local_stub health should report local_stub")
+		health_state["done"] = true
+	)
+
+	var valid_body := JSON.stringify({"raw": JSON.stringify({"note": "Remote note", "tags": ["remote"], "salience": 2.0})}).to_utf8_buffer()
+	var parsed := bridge._parse_remote_response("scribe", {}, HTTPRequest.RESULT_SUCCESS, 200, valid_body)
+	_assert(parsed.get("note", "") == "Remote note", "remote raw JSON should parse through the raw field")
+	_assert(parsed.get("salience", 0.0) == 1.0, "remote scribe salience should be clamped")
+
+	var invalid_body := JSON.stringify({"raw": "not json"}).to_utf8_buffer()
+	var fallback := bridge._parse_remote_response("scribe", {"recent_events": [{"type": "enemy_spawned"}], "ari": {"fear": 90}}, HTTPRequest.RESULT_SUCCESS, 200, invalid_body)
+	_assert(fallback.get("note", "").contains("enemy_spawned"), "invalid remote raw JSON should fall back to local_stub")
+	_assert(fallback.get("tags", []).has("fear_high"), "fallback after invalid raw should still validate local_stub tags")
+
+	await process_frame
+	_assert(health_state["done"], "health callback should run in local_stub mode")
 
 
 func _test_memory_records_events() -> void:
@@ -80,15 +103,15 @@ func _test_scribe_pipeline(bridge: AIBridge) -> void:
 	memory.record_event("wall_destroyed", {"phase": "night"})
 	memory.record_snapshot({"ari": {"fear": 83, "current_action": "hiding"}, "phase": "night"})
 
-	var done := false
+	var state := {"done": false}
 	scribe.create_scribe_note_from_recent_memory(memory, chronicle, {"phase": "night", "ari": {"fear": 83, "current_action": "hiding"}}, func(note: Dictionary) -> void:
 		_assert(note.get("note", "").contains("wall_destroyed"), "local scribe should mention the last event")
 		_assert(note.get("tags", []).has("fear_high"), "local scribe should tag high fear")
 		_assert(chronicle.get_today_scribe_notes().size() == 1, "scribe should add note to chronicle")
-		done = true
+		state["done"] = true
 	)
 	await process_frame
-	_assert(done, "scribe callback should run in local_stub mode")
+	_assert(state["done"], "scribe callback should run in local_stub mode")
 
 
 func _test_reflection_and_sleep_pipeline(bridge: AIBridge) -> void:
@@ -101,23 +124,23 @@ func _test_reflection_and_sleep_pipeline(bridge: AIBridge) -> void:
 
 	chronicle.add_scribe_note({"note": "Ari survived by preparing early.", "tags": ["prepare"], "salience": 0.8})
 
-	var reflected := false
+	var reflection_state := {"done": false}
 	reflection.request_library_reflection({"day": 1, "current_sign": "prepare before night"}, chronicle, lesson_book, func(note: Dictionary) -> void:
 		_assert(note.get("title", "") != "", "reflection should create a titled note")
 		_assert(lesson_book.get_all_notes().size() == 1, "reflection should add note to lesson book")
-		reflected = true
+		reflection_state["done"] = true
 	)
 	await process_frame
-	_assert(reflected, "reflection callback should run in local_stub mode")
+	_assert(reflection_state["done"], "reflection callback should run in local_stub mode")
 
-	var slept := false
+	var sleep_state := {"done": false}
 	sleep.request_sleep_plan({"day": 1}, lesson_book, func(plan: Dictionary) -> void:
 		_assert(plan.get("tomorrow_focus", []).has("prepare"), "sleep plan should include prepare focus")
 		_assert(plan.get("wake_thought", "") != "", "sleep plan should provide wake thought")
-		slept = true
+		sleep_state["done"] = true
 	)
 	await process_frame
-	_assert(slept, "sleep callback should run in local_stub mode")
+	_assert(sleep_state["done"], "sleep callback should run in local_stub mode")
 
 
 func _test_life_and_wisdom_pipeline(bridge: AIBridge) -> void:
@@ -126,33 +149,45 @@ func _test_life_and_wisdom_pipeline(bridge: AIBridge) -> void:
 	var wisdom = WisdomSynthesizerScript.new()
 	wisdom.ai_bridge = bridge
 
-	var life_summary := {}
-	var summary_done := false
+	var summary_state := {"summary": {}, "done": false}
 	bridge.request_life_summary({"life_id": "test-life", "result": "died", "survived_days": 1}, func(result: Dictionary) -> void:
-		life_summary = result
-		summary_done = true
+		summary_state["summary"] = result
+		summary_state["done"] = true
 	)
 	await process_frame
-	_assert(summary_done, "life summary callback should run in local_stub mode")
+	_assert(summary_state["done"], "life summary callback should run in local_stub mode")
+	var life_summary: Dictionary = summary_state["summary"]
+	var long_summary := ""
+	for i in range(800):
+		long_summary += "x"
 	archive.add_life_summary({
 		"life_id": "test-life",
 		"result": "died",
 		"survived_days": 1,
 		"life_summary_markdown": life_summary.get("life_summary_markdown", ""),
-		"candidate_insights": life_summary.get("candidate_insights", []),
+		"candidate_insights": [{
+			"title": "Prepare Before Night",
+			"summary": long_summary,
+			"conditions": ["dusk", "night", "extra", "extra2", "extra3", "extra4", "extra5", "extra6", "extra7", "extra8", "extra9", "extra10", "extra11"],
+			"suggested_actions": ["prepare"],
+			"confidence": 2.0,
+		}],
 		"next_life_hint": life_summary.get("next_life_hint", ""),
 	})
 	insights.add_or_merge_insight(life_summary.get("candidate_insights", [])[0])
 	insights.add_or_merge_insight(life_summary.get("candidate_insights", [])[0])
+	_assert(not insights.update_matching_insight({"title": "Unknown New Advice", "summary": "Should not be added."}), "updated insights should not create unmatched permanent insights")
 
 	_assert(archive.get_all_life_summaries().size() == 1, "life archive should store summary")
+	_assert(archive.get_all_life_summaries()[0].get("candidate_insights", [])[0].get("summary", "").length() == 500, "life archive should cap candidate insight summary length")
+	_assert(archive.get_all_life_summaries()[0].get("candidate_insights", [])[0].get("confidence", 0.0) == 1.0, "life archive should clamp candidate insight confidence")
 	_assert(insights.get_all_insights().size() == 1, "insight book should merge duplicate titles")
 	_assert(insights.get_all_insights()[0].get("times_confirmed", 0) == 2, "insight merge should increase confirmation count")
 
-	var wisdom_done := false
+	var wisdom_state := {"done": false}
 	wisdom.request_background_synthesis(archive, insights, func(result: Dictionary) -> void:
 		_assert(result.has("new_insights"), "wisdom synthesis should return a validated result")
-		wisdom_done = true
+		wisdom_state["done"] = true
 	)
 	await process_frame
-	_assert(wisdom_done, "wisdom callback should run in local_stub mode")
+	_assert(wisdom_state["done"], "wisdom callback should run in local_stub mode")

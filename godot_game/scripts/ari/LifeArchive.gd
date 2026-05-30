@@ -38,10 +38,38 @@ func _insight_array(value) -> Array:
 		return result
 	for item in value:
 		if typeof(item) == TYPE_DICTIONARY:
-			result.append(item.duplicate(true))
+			result.append(_validate_insight(item))
 		if result.size() >= 8:
 			break
 	return result
+
+
+func _validate_insight(insight: Dictionary) -> Dictionary:
+	var title := _limit_text(str(insight.get("title", "Untitled Insight")), 120)
+	return {
+		"id": _limit_text(str(insight.get("id", _normalize_title(title))), 120),
+		"title": title,
+		"summary": _limit_text(str(insight.get("summary", "")), 500),
+		"conditions": _string_array(insight.get("conditions", []), 12, 80),
+		"suggested_actions": _string_array(insight.get("suggested_actions", []), 12, 80),
+		"counters": _string_array(insight.get("counters", []), 12, 80),
+		"confidence": clampf(float(insight.get("confidence", 0.35)), 0.0, 1.0),
+	}
+
+
+func _string_array(value, max_count: int, max_length: int) -> Array[String]:
+	var result: Array[String] = []
+	if typeof(value) != TYPE_ARRAY:
+		return result
+	for item in value:
+		result.append(_limit_text(str(item), max_length))
+		if result.size() >= max_count:
+			break
+	return result
+
+
+func _normalize_title(text: String) -> String:
+	return text.to_lower().strip_edges().replace(" ", "_").replace("-", "_")
 
 
 func _copy_array(source: Array) -> Array:

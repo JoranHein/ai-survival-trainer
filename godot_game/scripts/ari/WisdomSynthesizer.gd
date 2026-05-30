@@ -23,12 +23,10 @@ func _apply_safe_changes(result: Dictionary, insight_book: PermanentInsightBook)
 	for insight in result.get("new_insights", []):
 		if typeof(insight) == TYPE_DICTIONARY:
 			insight_book.add_or_merge_insight(insight)
-			print("Insight added/merged: ", insight.get("title", ""))
 
 	for insight in result.get("updated_insights", []):
 		if typeof(insight) == TYPE_DICTIONARY:
-			insight_book.add_or_merge_insight(insight)
-			print("Insight added/merged: ", insight.get("title", ""))
+			insight_book.update_matching_insight(insight)
 
 
 func _validate_wisdom_result(result: Dictionary) -> Dictionary:

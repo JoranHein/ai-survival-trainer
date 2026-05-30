@@ -6,18 +6,48 @@ var insights: Array = []
 
 func add_or_merge_insight(insight: Dictionary) -> void:
 	var safe_insight := _validate_insight(insight)
-	var normalized_title := _normalize_title(safe_insight.get("title", ""))
-	for existing in insights:
-		if _normalize_title(existing.get("title", "")) == normalized_title:
-			existing["summary"] = safe_insight.get("summary", existing.get("summary", ""))
-			existing["confidence"] = clampf(max(float(existing.get("confidence", 0.0)), float(safe_insight.get("confidence", 0.0))), 0.0, 1.0)
-			existing["times_confirmed"] = int(existing.get("times_confirmed", 1)) + int(safe_insight.get("times_confirmed", 1))
-			existing["conditions"] = _merged_string_array(existing.get("conditions", []), safe_insight.get("conditions", []))
-			existing["suggested_actions"] = _merged_string_array(existing.get("suggested_actions", []), safe_insight.get("suggested_actions", []))
-			existing["counters"] = _merged_string_array(existing.get("counters", []), safe_insight.get("counters", []))
-			existing["source_lives"] = _merged_string_array(existing.get("source_lives", []), safe_insight.get("source_lives", []))
-			return
+	var existing := _find_existing_insight(safe_insight)
+	if not existing.is_empty():
+		existing["summary"] = safe_insight.get("summary", existing.get("summary", ""))
+		existing["confidence"] = clampf(max(float(existing.get("confidence", 0.0)), float(safe_insight.get("confidence", 0.0))), 0.0, 1.0)
+		existing["times_confirmed"] = int(existing.get("times_confirmed", 1)) + int(safe_insight.get("times_confirmed", 1))
+		existing["conditions"] = _merged_string_array(existing.get("conditions", []), safe_insight.get("conditions", []))
+		existing["suggested_actions"] = _merged_string_array(existing.get("suggested_actions", []), safe_insight.get("suggested_actions", []))
+		existing["counters"] = _merged_string_array(existing.get("counters", []), safe_insight.get("counters", []))
+		existing["source_lives"] = _merged_string_array(existing.get("source_lives", []), safe_insight.get("source_lives", []))
+		print("Insight added/merged: ", existing.get("title", ""))
+		return
 	insights.append(safe_insight)
+	print("Insight added/merged: ", safe_insight.get("title", ""))
+
+
+func update_matching_insight(insight: Dictionary) -> bool:
+	var safe_insight := _validate_insight(insight)
+	var existing := _find_existing_insight(safe_insight)
+	if existing.is_empty():
+		return false
+
+	existing["title"] = safe_insight.get("title", existing.get("title", ""))
+	existing["summary"] = safe_insight.get("summary", existing.get("summary", ""))
+	existing["confidence"] = clampf(float(safe_insight.get("confidence", existing.get("confidence", 0.0))), 0.0, 1.0)
+	existing["conditions"] = _merged_string_array(existing.get("conditions", []), safe_insight.get("conditions", []))
+	existing["suggested_actions"] = _merged_string_array(existing.get("suggested_actions", []), safe_insight.get("suggested_actions", []))
+	existing["counters"] = _merged_string_array(existing.get("counters", []), safe_insight.get("counters", []))
+	existing["source_lives"] = _merged_string_array(existing.get("source_lives", []), safe_insight.get("source_lives", []))
+	print("Insight added/merged: ", existing.get("title", ""))
+	return true
+
+
+func _find_existing_insight(insight: Dictionary) -> Dictionary:
+	var normalized_title := _normalize_title(insight.get("title", ""))
+	var id := str(insight.get("id", "")).strip_edges()
+	for existing in insights:
+		var existing_insight: Dictionary = existing
+		if id != "" and str(existing_insight.get("id", "")) == id:
+			return existing_insight
+		if _normalize_title(existing_insight.get("title", "")) == normalized_title:
+			return existing_insight
+	return {}
 
 
 func get_all_insights() -> Array:
