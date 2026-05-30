@@ -1,0 +1,158 @@
+extends SceneTree
+
+const AIBridgeScript = preload("res://scripts/autoload/AIBridge.gd")
+const AriMemoryScript = preload("res://scripts/ari/AriMemory.gd")
+const ChronicleScript = preload("res://scripts/ari/Chronicle.gd")
+const ScribeSystemScript = preload("res://scripts/ari/ScribeSystem.gd")
+const ReflectionSystemScript = preload("res://scripts/ari/ReflectionSystem.gd")
+const LessonBookScript = preload("res://scripts/ari/LessonBook.gd")
+const SleepConsolidationScript = preload("res://scripts/ari/SleepConsolidation.gd")
+const LifeArchiveScript = preload("res://scripts/ari/LifeArchive.gd")
+const PermanentInsightBookScript = preload("res://scripts/ari/PermanentInsightBook.gd")
+const WisdomSynthesizerScript = preload("res://scripts/ari/WisdomSynthesizer.gd")
+
+var failures: Array[String] = []
+
+
+func _initialize() -> void:
+	call_deferred("_run")
+
+
+func _run() -> void:
+	var bridge: AIBridge = AIBridgeScript.new()
+	root.add_child(bridge)
+	bridge.force_provider_mode("local_stub")
+
+	_test_memory_records_events()
+	_test_chronicle_validates_scribe_notes()
+	await _test_scribe_pipeline(bridge)
+	await _test_reflection_and_sleep_pipeline(bridge)
+	await _test_life_and_wisdom_pipeline(bridge)
+
+	if failures.is_empty():
+		print("AI pipeline tests passed.")
+		quit(0)
+	else:
+		for failure in failures:
+			push_error(failure)
+		quit(1)
+
+
+func _assert(condition: bool, message: String) -> void:
+	if not condition:
+		failures.append(message)
+
+
+func _test_memory_records_events() -> void:
+	var memory = AriMemoryScript.new()
+	memory.record_event("ari_damaged", {"day": 2, "phase": "night", "hp": 40})
+	memory.record_snapshot({"ari": {"fear": 72}, "phase": "night"})
+
+	var events = memory.get_recent_events()
+	var snapshots = memory.get_recent_snapshots()
+	_assert(events.size() == 1, "memory should store one event")
+	_assert(events[0].get("type", "") == "ari_damaged", "event should keep its type")
+	_assert(events[0].get("phase", "") == "night", "event should preserve provided phase")
+	_assert(snapshots.size() == 1, "memory should store one snapshot")
+
+
+func _test_chronicle_validates_scribe_notes() -> void:
+	var chronicle = ChronicleScript.new()
+	chronicle.add_scribe_note({
+		"t_start": 1,
+		"t_end": 2,
+		"note": "Ari noticed the wall cracking.",
+		"tags": ["wall", "danger", "extra", "extra2", "extra3", "extra4", "extra5", "extra6", "extra7"],
+		"salience": 2.0,
+	})
+
+	var note = chronicle.get_today_scribe_notes()[0]
+	_assert(note["tags"].size() == 8, "chronicle should cap scribe note tags")
+	_assert(note["salience"] == 1.0, "chronicle should clamp salience")
+
+
+func _test_scribe_pipeline(bridge: AIBridge) -> void:
+	var memory = AriMemoryScript.new()
+	var chronicle = ChronicleScript.new()
+	var scribe = ScribeSystemScript.new()
+	scribe.ai_bridge = bridge
+
+	memory.record_event("wall_destroyed", {"phase": "night"})
+	memory.record_snapshot({"ari": {"fear": 83, "current_action": "hiding"}, "phase": "night"})
+
+	var done := false
+	scribe.create_scribe_note_from_recent_memory(memory, chronicle, {"phase": "night", "ari": {"fear": 83, "current_action": "hiding"}}, func(note: Dictionary) -> void:
+		_assert(note.get("note", "").contains("wall_destroyed"), "local scribe should mention the last event")
+		_assert(note.get("tags", []).has("fear_high"), "local scribe should tag high fear")
+		_assert(chronicle.get_today_scribe_notes().size() == 1, "scribe should add note to chronicle")
+		done = true
+	)
+	await process_frame
+	_assert(done, "scribe callback should run in local_stub mode")
+
+
+func _test_reflection_and_sleep_pipeline(bridge: AIBridge) -> void:
+	var chronicle = ChronicleScript.new()
+	var lesson_book = LessonBookScript.new()
+	var reflection = ReflectionSystemScript.new()
+	var sleep = SleepConsolidationScript.new()
+	reflection.ai_bridge = bridge
+	sleep.ai_bridge = bridge
+
+	chronicle.add_scribe_note({"note": "Ari survived by preparing early.", "tags": ["prepare"], "salience": 0.8})
+
+	var reflected := false
+	reflection.request_library_reflection({"day": 1, "current_sign": "prepare before night"}, chronicle, lesson_book, func(note: Dictionary) -> void:
+		_assert(note.get("title", "") != "", "reflection should create a titled note")
+		_assert(lesson_book.get_all_notes().size() == 1, "reflection should add note to lesson book")
+		reflected = true
+	)
+	await process_frame
+	_assert(reflected, "reflection callback should run in local_stub mode")
+
+	var slept := false
+	sleep.request_sleep_plan({"day": 1}, lesson_book, func(plan: Dictionary) -> void:
+		_assert(plan.get("tomorrow_focus", []).has("prepare"), "sleep plan should include prepare focus")
+		_assert(plan.get("wake_thought", "") != "", "sleep plan should provide wake thought")
+		slept = true
+	)
+	await process_frame
+	_assert(slept, "sleep callback should run in local_stub mode")
+
+
+func _test_life_and_wisdom_pipeline(bridge: AIBridge) -> void:
+	var archive = LifeArchiveScript.new()
+	var insights = PermanentInsightBookScript.new()
+	var wisdom = WisdomSynthesizerScript.new()
+	wisdom.ai_bridge = bridge
+
+	var life_summary := {}
+	var summary_done := false
+	bridge.request_life_summary({"life_id": "test-life", "result": "died", "survived_days": 1}, func(result: Dictionary) -> void:
+		life_summary = result
+		summary_done = true
+	)
+	await process_frame
+	_assert(summary_done, "life summary callback should run in local_stub mode")
+	archive.add_life_summary({
+		"life_id": "test-life",
+		"result": "died",
+		"survived_days": 1,
+		"life_summary_markdown": life_summary.get("life_summary_markdown", ""),
+		"candidate_insights": life_summary.get("candidate_insights", []),
+		"next_life_hint": life_summary.get("next_life_hint", ""),
+	})
+	insights.add_or_merge_insight(life_summary.get("candidate_insights", [])[0])
+	insights.add_or_merge_insight(life_summary.get("candidate_insights", [])[0])
+
+	_assert(archive.get_all_life_summaries().size() == 1, "life archive should store summary")
+	_assert(insights.get_all_insights().size() == 1, "insight book should merge duplicate titles")
+	_assert(insights.get_all_insights()[0].get("times_confirmed", 0) == 2, "insight merge should increase confirmation count")
+
+	var wisdom_done := false
+	wisdom.request_background_synthesis(archive, insights, func(result: Dictionary) -> void:
+		_assert(result.has("new_insights"), "wisdom synthesis should return a validated result")
+		wisdom_done = true
+	)
+	await process_frame
+	_assert(wisdom_done, "wisdom callback should run in local_stub mode")

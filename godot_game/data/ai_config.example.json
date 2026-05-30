@@ -1,0 +1,11 @@
+{
+  "provider_mode": "local_stub",
+  "server_base_url": "http://YOUR_SERVER_IP:8080",
+  "api_key": "PUT_SECRET_IN_LOCAL_CONFIG_ONLY",
+  "timeout_seconds": 8.0,
+  "enable_scribe": true,
+  "enable_library_reflection": true,
+  "enable_sleep_plan": true,
+  "enable_life_summary": true,
+  "enable_wisdom_synthesis": true
+}
