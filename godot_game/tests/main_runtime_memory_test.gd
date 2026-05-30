@@ -38,21 +38,25 @@ func _test_runtime_memory_accumulates(main: Control) -> void:
 	var snapshots: Array = main.memory.get_recent_snapshots(20)
 	var latest_snapshot: Dictionary = snapshots[snapshots.size() - 1] if not snapshots.is_empty() else {}
 	var text := _label_text(main)
+	var ari: Dictionary = latest_snapshot.get("ari", {})
+	var world: Dictionary = latest_snapshot.get("world", {})
 
 	_assert(snapshots.size() >= 10, "Main should record a runtime snapshot every simulated second")
 	_assert(latest_snapshot.get("time", -1.0) >= 10.0, "runtime snapshots should include elapsed time")
-	_assert(latest_snapshot.get("phase", "") == "debug", "runtime snapshots should use safe default phase")
-	_assert(latest_snapshot.get("day", 0) == 1, "runtime snapshots should include safe default day")
-	_assert(latest_snapshot.get("ari", {}).get("hp", -1) == 100.0, "runtime snapshots should include safe default Ari HP")
-	_assert(latest_snapshot.get("ari", {}).get("fear", -1) == 0.0, "runtime snapshots should include safe default Ari fear")
-	_assert(latest_snapshot.get("ari", {}).get("hunger", -1) == 0.0, "runtime snapshots should include safe default Ari hunger")
-	_assert(latest_snapshot.get("ari", {}).get("stamina", -1) == 100.0, "runtime snapshots should include safe default Ari stamina")
-	_assert(latest_snapshot.get("ari", {}).get("current_action", "") == "debug_idle", "runtime snapshots should use safe default Ari action")
-	_assert(latest_snapshot.get("world", {}).get("enemy_count", -1) == 0, "runtime snapshots should include safe world defaults")
-	_assert(latest_snapshot.get("world", {}).get("stone", -1) == 0, "runtime snapshots should include safe default stone")
-	_assert(latest_snapshot.get("world", {}).get("wall_count", -1) == 0, "runtime snapshots should include safe default wall count")
-	_assert(latest_snapshot.get("world", {}).get("aura_orb_count", -1) == 0, "runtime snapshots should include safe default aura orb count")
+	_assert(["morning", "midday", "dusk", "night"].has(latest_snapshot.get("phase", "")), "runtime snapshots should include the current survival phase")
+	_assert(latest_snapshot.get("day", 0) == main.current_day, "runtime snapshots should include the current survival day")
+	_assert(ari.get("hp", -1) == main.ari_hp, "runtime snapshots should include real Ari HP")
+	_assert(ari.get("fear", -1) == main.ari_fear, "runtime snapshots should include real Ari fear")
+	_assert(ari.get("hunger", -1) == main.ari_hunger, "runtime snapshots should include real Ari hunger")
+	_assert(ari.get("stamina", -1) == main.ari_stamina, "runtime snapshots should include real Ari stamina")
+	_assert(ari.get("current_action", "") == main.ari_current_action, "runtime snapshots should include Ari's real current action")
+	_assert(world.get("enemy_count", -1) == main.world_enemy_count, "runtime snapshots should include real enemy count")
+	_assert(world.get("stone", -1) == 0, "runtime snapshots should keep unimplemented stone at zero")
+	_assert(world.get("wall_count", -1) == 0, "runtime snapshots should keep unimplemented wall count at zero")
+	_assert(world.get("aura_orb_count", -1) == 0, "runtime snapshots should keep unimplemented aura orb count at zero")
 	_assert(main.chronicle.get_lifetime_scribe_notes().size() >= 2, "Main should auto-create scribe notes every five simulated seconds")
+	_assert(text.contains("Day:"), "survival UI should show day")
+	_assert(text.contains("Ari HP:"), "survival UI should show Ari HP")
 	_assert(text.contains("Snapshots:"), "debug UI should show snapshot count")
 	_assert(text.contains("Memory events:"), "debug UI should show memory event count")
 	_assert(text.contains("Latest scribe:"), "debug UI should show latest automatic scribe note")
@@ -86,7 +90,12 @@ func _press_key(main: Control, keycode: Key) -> void:
 
 
 func _label_text(main: Control) -> String:
-	return main.get_node("%DebugLabel").text
+	var text := ""
+	if main.has_node("%SurvivalLabel"):
+		text += main.get_node("%SurvivalLabel").text + "\n"
+	if main.has_node("%DebugLabel"):
+		text += main.get_node("%DebugLabel").text
+	return text
 
 
 func _assert(condition: bool, message: String) -> void:
