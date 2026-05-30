@@ -62,9 +62,10 @@ func _assert(condition: bool, message: String) -> void:
 
 func _test_initial_control_text(main: Control) -> void:
 	var text := _label_text(main)
-	_assert(not text.contains("F6"), "debug instructions should not mention F6")
-	_assert(not text.contains("F10"), "debug instructions should not mention F10")
-	_assert(text.contains("1 = create fake scribe note"), "debug instructions should show key 1 for scribe")
+	for key_number in range(6, 11):
+		var old_label := "F" + str(key_number)
+		_assert(not text.contains(old_label), "debug instructions should not mention old function-key labels")
+	_assert(text.contains("1 = create scribe note"), "debug instructions should show key 1 for scribe")
 	_assert(text.contains("2 = request library reflection"), "debug instructions should show key 2 for reflection")
 	_assert(text.contains("3 = request sleep plan"), "debug instructions should show key 3 for sleep")
 	_assert(text.contains("4 = request life summary"), "debug instructions should show key 4 for life summary")
@@ -88,7 +89,7 @@ func _test_reflection_requested(main: Control) -> void:
 func _test_sleep_requested(main: Control) -> void:
 	var text := _label_text(main)
 	_assert(text.contains("3: Sleep plan requested"), "pressing 3 should show sleep request confirmation")
-	_assert(text.contains("Latest sleep:"), "pressing 3 should show latest sleep thought")
+	_assert(text.contains("Latest sleep: I read the last note again."), "pressing 3 should show latest sleep thought")
 
 
 func _test_life_summary_requested(main: Control) -> void:
@@ -101,4 +102,4 @@ func _test_life_summary_requested(main: Control) -> void:
 func _test_wisdom_requested(main: Control) -> void:
 	var text := _label_text(main)
 	_assert(text.contains("5: Wisdom synthesis requested"), "pressing 5 should show wisdom request confirmation")
-	_assert(text.contains("Latest wisdom:"), "pressing 5 should show latest wisdom count")
+	_assert(text.contains("Latest wisdom: 1 permanent insight(s)"), "pressing 5 should show latest wisdom count")
