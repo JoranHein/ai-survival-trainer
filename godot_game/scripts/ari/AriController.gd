@@ -316,6 +316,8 @@ func get_action_cue() -> Dictionary:
 		return _make_action_cue("reflect", phase, Color(0.74, 0.66, 1.0, 1.0))
 	if action.find("repair") >= 0:
 		return _make_action_cue("repair", phase, Color(0.48, 0.88, 1.0, 1.0))
+	if action.find("cover") >= 0 or action.find("lure") >= 0 or action.find("aura") >= 0:
+		return _make_action_cue("wait", phase, Color(0.70, 0.88, 1.0, 1.0))
 	if (
 		action.find("build") >= 0
 		or action.find("wall") >= 0

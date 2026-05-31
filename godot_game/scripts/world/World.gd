@@ -75,6 +75,7 @@ var sign_strength := 0.0
 var sign_resonance := 0.0
 var ai_bridge: AIBridge
 var ai_status := "AI disabled"
+var ai_survival_theory := ""
 var personality_traits := {}
 var personality_summary := "Ari: balanced"
 var ari_memory := AriMemory.new()
@@ -203,6 +204,7 @@ func start_run() -> void:
 	death_reward = 0
 	_ai_sign_request_id += 1
 	_update_ai_idle_status()
+	ai_survival_theory = ""
 	run_build.call("reset_run")
 	personality.call("randomize_for_run")
 	personality_traits = personality.call("get_traits")
@@ -270,19 +272,27 @@ func stage_visual_review_moment(moment: String) -> void:
 			_stage_morning_intent_path()
 		"midday_alive":
 			select_run_build_preset(3, false)
-			commit_sign("build stone walls before night")
+			commit_sign("stand behind the wall")
 			var arena := get_arena_rect()
 			resource_system.call("add_stone", 84)
 			resource_system.call("add_food", 2)
 			_place_visual_review_defense_layout(arena)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 26.0)
+			sign_interpretation = "Ari thinks the sign means to use the existing wall as cover."
+			sign_priority_hints = _normalize_ai_priority_hints({
+				"use_existing_wall": 0.9,
+				"wait_behind_wall": 0.85,
+				"use_cover": 0.9,
+				"build_wall": 0.1,
+			})
+			sign_strength = 0.78
+			sign_resonance = 0.76
+			ai_survival_theory = "use_cover"
+			ai_status = "AI staged"
+			_stage_ari_needs(68.0, 82.0, 22.0)
 			day_night.advance(21.0)
-			_advance_debug_daytime(10.0)
-			_stage_ari_needs(45.0, 36.0, 58.0)
+			_advance_debug_daytime(4.0)
 			_set_status_message("Ari read the sign.", 1.8)
-			if ari != null:
-				ari.global_position = _get_station_spot(bed_station, "get_rest_spot")
-				ari.call("advance_rest_job", 0.01, true, "Need calm before night")
 			_show_current_job_thought(true)
 			selected_build_type = SPIKE_TRAP_BUILD_ID
 			build_grid.call("set_selected_build_type", selected_build_type)
@@ -507,6 +517,14 @@ func get_wall_count() -> int:
 
 func get_aura_orb_count() -> int:
 	return aura_orbs.size()
+
+
+func get_existing_walls() -> Array:
+	return walls.duplicate()
+
+
+func get_aura_orbs() -> Array:
+	return aura_orbs.duplicate()
 
 
 func get_spike_trap_count() -> int:
@@ -780,6 +798,8 @@ func _emit_state() -> void:
 		"sign_priority_hints": sign_priority_hints,
 		"sign_action_focus": _get_sign_action_focus(ari_job, ari_job_reason),
 		"ai_status": ai_status,
+		"ai_survival_theory": ai_survival_theory,
+		"ai_top_hint": _get_top_priority_hint(sign_priority_hints),
 		"personality": personality_traits,
 		"personality_summary": personality_summary,
 		"run_build": _get_run_build_context(),
@@ -1158,6 +1178,10 @@ func _advance_ari_daytime(delta: float) -> void:
 		"train_combat":
 			_set_ari_intent(_get_station_spot(training_dummy, "get_training_spot"), "Train")
 			ari.call("advance_training_job", delta, true, reason)
+		"use_cover":
+			_advance_ari_cover_job(delta, reason)
+		"lure_to_aura":
+			_advance_ari_aura_lure_job(delta, reason)
 		_:
 			var wait_position := _get_defense_wait_position()
 			_set_ari_intent(wait_position, "Wait")
@@ -1197,6 +1221,30 @@ func _advance_ari_repair_job(delta: float, reason: String) -> void:
 			"day": day_night.day,
 			"phase": day_night.phase,
 		})
+
+
+func _advance_ari_cover_job(delta: float, reason: String) -> void:
+	var cover := _find_cover_position()
+	if not bool(cover.get("valid", false)):
+		var wait_position := _get_defense_wait_position()
+		_set_ari_intent(wait_position, "Cover")
+		ari.call("wait_near", delta, wait_position, "No wall cover available")
+		return
+	var target_position: Vector2 = cover["position"]
+	_set_ari_intent(target_position, "Cover")
+	ari.call("advance_move_job", delta, "use_cover", reason, target_position, "using wall cover")
+
+
+func _advance_ari_aura_lure_job(delta: float, reason: String) -> void:
+	var lure := _find_aura_lure_position()
+	if not bool(lure.get("valid", false)):
+		var wait_position := _get_defense_wait_position()
+		_set_ari_intent(wait_position, "Lure")
+		ari.call("wait_near", delta, wait_position, "No aura lure available")
+		return
+	var target_position: Vector2 = lure["position"]
+	_set_ari_intent(target_position, "Lure")
+	ari.call("advance_move_job", delta, "lure_to_aura", reason, target_position, "luring through aura")
 
 
 func _get_ari_mind_context() -> Dictionary:
@@ -1481,6 +1529,71 @@ func _get_defense_anchor() -> Vector2:
 
 func _get_defense_wait_position() -> Vector2:
 	return _get_defense_anchor() + Vector2(-32.0, 0.0)
+
+
+func _find_cover_position() -> Dictionary:
+	var wall := _nearest_valid_structure(walls)
+	if wall == null:
+		return {"valid": false}
+	var anchor := _get_defense_anchor()
+	var wall_position: Vector2 = wall.global_position
+	var direction := anchor - wall_position
+	if direction.length() < 0.1 and ari != null:
+		direction = ari.global_position - wall_position
+	if direction.length() < 0.1:
+		direction = Vector2.LEFT
+	return {
+		"valid": true,
+		"position": _clamp_point_to_arena(wall_position + direction.normalized() * 38.0),
+		"structure": wall,
+	}
+
+
+func _find_aura_lure_position() -> Dictionary:
+	var aura := _nearest_valid_structure(aura_orbs)
+	if aura == null:
+		return {"valid": false}
+	var anchor := _get_defense_anchor()
+	var aura_position: Vector2 = aura.global_position
+	var direction := anchor - aura_position
+	if direction.length() < 0.1 and ari != null:
+		direction = ari.global_position - aura_position
+	if direction.length() < 0.1:
+		direction = Vector2.LEFT
+	var radius := 96.0
+	var radius_value = aura.get("aura_radius")
+	if typeof(radius_value) == TYPE_FLOAT or typeof(radius_value) == TYPE_INT:
+		radius = float(radius_value)
+	return {
+		"valid": true,
+		"position": _clamp_point_to_arena(aura_position + direction.normalized() * minf(radius * 0.55, 58.0)),
+		"structure": aura,
+	}
+
+
+func _nearest_valid_structure(candidates: Array) -> Node2D:
+	var target: Node2D = null
+	var best_distance := INF
+	var origin := ari.global_position if ari != null else _get_defense_anchor()
+	for structure in candidates:
+		if not is_instance_valid(structure):
+			continue
+		var structure_node := structure as Node2D
+		if structure_node == null:
+			continue
+		var distance := origin.distance_to(structure_node.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			target = structure_node
+	return target
+
+
+func _clamp_point_to_arena(point: Vector2) -> Vector2:
+	var arena := get_arena_rect().grow(-18.0)
+	return Vector2(
+		clampf(point.x, arena.position.x, arena.end.x),
+		clampf(point.y, arena.position.y, arena.end.y)
+	)
 
 
 func _set_ari_intent(target_position: Vector2, label: String) -> void:
@@ -2165,6 +2278,13 @@ func _show_sign_interpretation_thought(force := false) -> void:
 
 
 func _get_sign_action_focus(ari_job: String, ari_job_reason: String) -> String:
+	var ai_hint := _get_top_priority_hint(sign_priority_hints)
+	if ari_job == "use_cover":
+		return "AI pull: cover -> Ari is following it."
+	if ari_job == "lure_to_aura":
+		return "AI pull: lure to light -> Ari is following it."
+	if ai_hint == "repair" and ari_job_reason.to_lower().find("repair") >= 0:
+		return "AI pull: repair -> Ari is reporting the gap."
 	if sign_mind == null or not sign_mind.has_method("describe_action_focus"):
 		return ""
 	return str(sign_mind.call("describe_action_focus", sign_priority_hints, ari_job, ari_job_reason))
@@ -2201,6 +2321,7 @@ func _on_ai_deep_interpretation_response(request_id: int, result: Dictionary) ->
 	sign_priority_hints = _normalize_ai_priority_hints(result.get("priority_hints", {}))
 	sign_strength = clampf(float(result.get("sign_strength", sign_strength)), 0.0, 1.0)
 	sign_resonance = clampf(float(result.get("resonance", sign_resonance)), 0.0, 1.0)
+	ai_survival_theory = str(result.get("survival_theory", "")).strip_edges()
 	ai_status = "AI active"
 	var thought := str(result.get("thought", "")).strip_edges()
 	if thought != "":
@@ -2280,6 +2401,20 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 
 func _set_hint_max(hints: Dictionary, key: String, value: float) -> void:
 	hints[key] = maxf(float(hints.get(key, 0.0)), clampf(value, 0.0, 1.0))
+
+
+func _get_top_priority_hint(hints: Dictionary) -> String:
+	var best_key := ""
+	var best_value := 0.0
+	for raw_key in hints.keys():
+		var key := str(raw_key)
+		var value := clampf(float(hints[raw_key]), 0.0, 1.0)
+		if value > best_value:
+			best_key = key
+			best_value = value
+	if best_value < 0.15:
+		return ""
+	return best_key
 
 
 func _known_enemy_types() -> Array[String]:
@@ -2402,6 +2537,7 @@ func _show_structure_destroyed_thought(structure_type: String) -> void:
 func _reinterpret_current_sign() -> void:
 	var interpretation: Dictionary = sign_mind.call("interpret_sign", sign_text, personality_traits, _get_run_build_context())
 	sign_interpretation = str(interpretation.get("interpretation_text", "Ari can read the words, but not a useful plan yet."))
+	ai_survival_theory = ""
 	var hints = interpretation.get("priority_hints", {})
 	sign_priority_hints = hints.duplicate(true) if typeof(hints) == TYPE_DICTIONARY else {}
 	var effects := _get_run_build_effects()

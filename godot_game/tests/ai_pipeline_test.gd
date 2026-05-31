@@ -10,6 +10,7 @@ const SleepConsolidationScript = preload("res://scripts/ari/SleepConsolidation.g
 const LifeArchiveScript = preload("res://scripts/ari/LifeArchive.gd")
 const PermanentInsightBookScript = preload("res://scripts/ari/PermanentInsightBook.gd")
 const WisdomSynthesizerScript = preload("res://scripts/ari/WisdomSynthesizer.gd")
+const AriMindScript = preload("res://scripts/ari/AriMind.gd")
 
 var failures: Array[String] = []
 
@@ -25,6 +26,7 @@ func _run() -> void:
 
 	await _test_bridge_health_and_raw_validation(bridge)
 	_test_deep_interpretation_contract(bridge)
+	_test_ai_tactical_priority_jobs()
 	_test_memory_records_events()
 	_test_chronicle_validates_scribe_notes()
 	await _test_scribe_pipeline(bridge)
@@ -93,6 +95,9 @@ func _test_deep_interpretation_contract(bridge: AIBridge) -> void:
 		"priority_hints": {
 			"build_wall": 2.0,
 			"wait_behind_wall": "0.7",
+			"lure_to_aura": 0.8,
+			"repair": 0.4,
+			"kite": 1.5,
 			"unknown_key": 1.0,
 		},
 		"sign_strength": -5.0,
@@ -105,6 +110,9 @@ func _test_deep_interpretation_contract(bridge: AIBridge) -> void:
 	var hints: Dictionary = response.get("priority_hints", {})
 	_assert(hints.get("build_wall", 0.0) == 1.0, "deep build_wall hint should be clamped")
 	_assert(hints.get("wait_behind_wall", 0.0) == 0.7, "deep wait_behind_wall hint should accept numeric strings")
+	_assert(hints.get("lure_to_aura", 0.0) == 0.8, "deep lure_to_aura hint should be preserved")
+	_assert(hints.get("repair", 0.0) == 0.4, "deep repair hint should be preserved")
+	_assert(hints.get("kite", 0.0) == 1.0, "deep kite hint should be clamped")
 	_assert(not hints.has("unknown_key"), "deep priority hints should remove unknown keys")
 	_assert(response.get("sign_strength", 1.0) == 0.0, "deep sign strength should clamp low values")
 	_assert(response.get("resonance", 0.0) == 1.0, "deep resonance should clamp high values")
@@ -115,6 +123,89 @@ func _test_deep_interpretation_contract(bridge: AIBridge) -> void:
 	_assert(fallback.get("source", "") == "disabled", "deep fallback should preserve source")
 	_assert(fallback_hints.get("build_wall", 0.0) == 0.4, "deep fallback should translate local wall hint")
 	_assert(fallback_hints.get("wait_or_idle", 0.0) == 0.2, "deep fallback should translate local defensive wait hint")
+
+
+func _test_ai_tactical_priority_jobs() -> void:
+	var ari_mind: AriMind = AriMindScript.new()
+
+	var cover_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 1,
+		"aura_orb_count": 0,
+		"priority_hints": {
+			"use_existing_wall": 0.9,
+			"wait_behind_wall": 0.8,
+			"use_cover": 0.9,
+			"build_wall": 0.1,
+		},
+	}))
+	_assert(cover_decision.get("job", "") == "use_cover", "cover hints should make Ari use an existing wall instead of building more")
+	_assert(str(cover_decision.get("reason", "")).to_lower().contains("wall"), "cover job should explain the wall tactic")
+
+	var aura_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 1,
+		"aura_orb_count": 1,
+		"priority_hints": {
+			"lure_to_aura": 0.95,
+			"place_aura_orb": 0.2,
+		},
+	}))
+	_assert(aura_decision.get("job", "") == "lure_to_aura", "lure_to_aura should make Ari use an existing Aura Orb instead of building")
+	_assert(str(aura_decision.get("reason", "")).to_lower().contains("light"), "aura lure job should explain the light tactic")
+
+	var repair_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 1,
+		"damaged_structure_count": 0,
+		"priority_hints": {
+			"repair": 0.9,
+		},
+	}))
+	_assert(repair_decision.get("job", "") == "wait_or_idle", "repair hint without damaged structures should not invent a new repair system")
+	_assert(str(repair_decision.get("reason", "")).to_lower().contains("repair"), "unavailable repair should still be reported as Ari's reason")
+	ari_mind.free()
+
+
+func _base_mind_context(overrides: Dictionary) -> Dictionary:
+	var context := {
+		"is_night": false,
+		"phase": "midday",
+		"time_left": 25.0,
+		"night_close": false,
+		"stone": 20,
+		"wall_cost": 4,
+		"aura_orb_cost": 5,
+		"spike_trap_cost": 5,
+		"bow_tower_cost": 6,
+		"tar_pit_cost": 4,
+		"fear_lantern_cost": 5,
+		"decoy_idol_cost": 4,
+		"thorn_totem_cost": 5,
+		"repair_bench_cost": 6,
+		"storm_rod_cost": 7,
+		"wall_count": 0,
+		"aura_orb_count": 0,
+		"spike_trap_count": 0,
+		"bow_tower_count": 0,
+		"tar_pit_count": 0,
+		"fear_lantern_count": 0,
+		"decoy_idol_count": 0,
+		"thorn_totem_count": 0,
+		"repair_bench_count": 0,
+		"storm_rod_count": 0,
+		"damaged_structure_count": 0,
+		"lowest_structure_hp_ratio": 1.0,
+		"combat_stats": {"combat_level": 0.0},
+		"needs": {"hunger": 72.0, "stamina": 92.0, "fear": 18.0},
+		"food": 2,
+		"lesson_count": 0,
+		"lesson_priority_bias": {},
+		"priority_hints": {},
+		"personality": {"fearfulness": 0.45, "aggression": 0.25, "curiosity": 0.5},
+		"run_build": {"points": {}},
+		"current_job": "wait_or_idle",
+	}
+	for key in overrides.keys():
+		context[key] = overrides[key]
+	return context
 
 
 func _test_memory_records_events() -> void:

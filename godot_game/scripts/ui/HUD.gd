@@ -40,6 +40,8 @@ func update_state(state: Dictionary) -> void:
 	var death_recap := str(state.get("death_recap", ""))
 	var sign_action_focus := str(state.get("sign_action_focus", ""))
 	var ai_status := str(state.get("ai_status", "AI disabled"))
+	var ai_survival_theory := str(state.get("ai_survival_theory", ""))
+	var ai_top_hint := str(state.get("ai_top_hint", ""))
 	var progression := _progression(state)
 	var time_points := int(progression.get("time_points", 0))
 	var permanent_summary := str(progression.get("permanent_summary", "No permanent upgrades yet"))
@@ -92,6 +94,10 @@ func update_state(state: Dictionary) -> void:
 			mind_lines.append("Note: %s" % latest_lesson_title)
 		if sign_action_focus != "":
 			mind_lines.append(sign_action_focus)
+		if ai_survival_theory != "":
+			mind_lines.append("AI theory: %s" % ai_survival_theory)
+		elif ai_top_hint != "":
+			mind_lines.append("Top hint: %s" % ai_top_hint)
 		if ai_status != "":
 			mind_lines.append(ai_status)
 		if inspect_text != "":

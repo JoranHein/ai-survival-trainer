@@ -72,17 +72,23 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var sign_decoy_preference := _hint(priority_hints, "build_decoy_idol")
 	var sign_thorn_preference := _hint(priority_hints, "build_thorn_totem")
 	var sign_repair_bench_preference := _hint(priority_hints, "build_repair_bench")
-	var sign_repair_preference := _hint(priority_hints, "repair_structure")
+	var sign_repair_preference := maxf(_hint(priority_hints, "repair_structure"), _hint(priority_hints, "repair"))
 	var sign_storm_preference := _hint(priority_hints, "build_storm_rod")
 	var sign_rest_preference := _hint(priority_hints, "rest")
 	var sign_reflect_preference := _hint(priority_hints, "reflect_library")
+	var cover_preference := maxf(
+		maxf(_hint(priority_hints, "use_existing_wall"), _hint(priority_hints, "wait_behind_wall")),
+		maxf(_hint(priority_hints, "use_cover"), _hint(priority_hints, "hide"))
+	)
+	var aura_lure_preference := _hint(priority_hints, "lure_to_aura")
+	var kite_preference := maxf(_hint(priority_hints, "kite"), _hint(priority_hints, "flee"))
 	var wall_preference := sign_wall_preference
 	var aura_preference := sign_aura_preference
 	var mining_preference := sign_mining_preference
 	var combat_preference := sign_combat_preference
 	var food_preference := sign_food_preference
 	var trap_preference := sign_trap_preference
-	var range_preference := _hint(priority_hints, "range")
+	var range_preference := maxf(_hint(priority_hints, "range"), kite_preference)
 	var tower_preference := maxf(sign_tower_preference, range_preference)
 	var tar_pit_preference := sign_tar_pit_preference
 	var lantern_preference := sign_lantern_preference
@@ -93,7 +99,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var storm_preference := sign_storm_preference
 	var rest_preference := sign_rest_preference
 	var reflect_preference := sign_reflect_preference
-	var defensive_wait_preference := _hint(priority_hints, "defensive_wait")
+	var defensive_wait_preference := maxf(_hint(priority_hints, "defensive_wait"), maxf(cover_preference, _hint(priority_hints, "wait_or_idle")))
 	wall_preference = clampf(wall_preference + (fearfulness * 0.22 if wall_preference > 0.0 or fearfulness >= 0.66 else 0.0), 0.0, 1.0)
 	aura_preference = clampf(aura_preference + (fearfulness * 0.12 + curiosity * 0.10 if aura_preference > 0.0 else 0.0), 0.0, 1.0)
 	mining_preference = clampf(mining_preference + (curiosity * 0.10 if mining_preference > 0.0 else 0.0), 0.0, 1.0)
@@ -167,6 +173,18 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 
 	if damaged_structure_count > 0 and repair_preference > 0.30:
 		return _job("repair_structure", "Patch damaged defenses" if sign_repair_preference <= 0.0 else "Sign says repair what broke")
+
+	if sign_repair_preference > 0.25 and damaged_structure_count <= 0 and has_defenses:
+		return _job("wait_or_idle", "Sign wants repair, but nothing is broken yet")
+
+	if aura_lure_preference > 0.30 and aura_orb_count > 0 and aura_lure_preference >= cover_preference:
+		return _job("lure_to_aura", "Sign says the light should hurt them")
+
+	if cover_preference > 0.30 and wall_count > 0:
+		return _job("use_cover", "Sign says use the existing wall as cover")
+
+	if aura_lure_preference > 0.30 and aura_orb_count > 0:
+		return _job("lure_to_aura", "Sign says the light should hurt them")
 
 	var aura_can_lead := wall_count > 0 or sign_aura_preference > 0.0 or warding_points >= 5
 	if aura_preference > 0.0 and aura_orb_count < target_aura_orb_count and aura_can_lead:
@@ -314,6 +332,10 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 			if lower_reason.find("sign says") >= 0:
 				return "The sign says repair. Broken safety is still worth saving."
 			return "This is damaged. I can make it hold a little longer."
+		"use_cover":
+			return "The wall is already there. I should put it between me and their teeth."
+		"lure_to_aura":
+			return "If they cross the light, I do not have to touch them."
 		"build_storm_rod":
 			if lower_reason.find("wings") >= 0 or lower_reason.find("sky") >= 0:
 				return "The wall did not reach the sky. The storm might."
@@ -341,6 +363,8 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 		"wait_or_idle":
 			if lower_reason.find("no bow yet") >= 0:
 				return "The sign wants arrows, but I do not have arrows yet."
+			if lower_reason.find("repair") >= 0:
+				return "The sign wants repair, but my hands do not know that yet."
 			if lower_reason.find("sign asks for safety") >= 0:
 				return "The sign says safe. I will stay near what can protect me."
 			if lower_reason.find("night has started") >= 0:
