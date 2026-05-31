@@ -3,12 +3,12 @@
 [ext_resource type="Script" path="res://scripts/ui/ThoughtBubble.gd" id="1_bubble"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bubble"]
-bg_color = Color(0.94, 0.98, 1, 0.95)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.1, 0.18, 0.22, 0.95)
+bg_color = Color(0.95, 0.985, 1, 0.98)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.07, 0.13, 0.16, 1)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_right = 8
@@ -25,9 +25,9 @@ script = ExtResource("1_bubble")
 
 [node name="Panel" type="PanelContainer" parent="."]
 unique_name_in_owner = true
-offset_left = -132.0
+offset_left = -146.0
 offset_top = -92.0
-offset_right = 132.0
+offset_right = 146.0
 offset_bottom = -8.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_bubble")
@@ -36,6 +36,6 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_bubble")
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.04, 0.07, 0.08, 1)
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 17
 text = "Stone first. Weak walls only pretend to protect me."
 autowrap_mode = 3

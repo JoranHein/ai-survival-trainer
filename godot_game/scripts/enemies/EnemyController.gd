@@ -10,48 +10,42 @@ signal died(enemy: Node)
 @export var attack_damage := 10.0
 @export var attack_cooldown_seconds := 1.0
 @export var structure_attack_damage := 8.0
+@export var enemy_type := "zombie"
 
 var target: Node2D
 var world: Node
-var enemy_type := "zombie"
 var hp := 35.0
 var _attack_cooldown := 0.0
 var _hit_flash := 0.0
 var _facing_direction := Vector2.RIGHT
 
 
+func _ready() -> void:
+	configure_type(enemy_type)
+
+
 func configure_type(next_type: String) -> void:
-	enemy_type = next_type
-	match enemy_type:
-		"runner":
-			max_hp = 22.0
-			speed = 118.0
-			radius = 10.0
-			attack_damage = 7.0
-			structure_attack_damage = 5.0
-			attack_cooldown_seconds = 0.75
-		"brute":
-			max_hp = 95.0
-			speed = 42.0
-			radius = 18.0
-			attack_damage = 16.0
-			structure_attack_damage = 22.0
-			attack_cooldown_seconds = 1.25
-		"flying":
-			max_hp = 28.0
-			speed = 88.0
-			radius = 12.0
-			attack_damage = 9.0
-			structure_attack_damage = 0.0
-			attack_cooldown_seconds = 0.9
-		_:
-			enemy_type = "zombie"
-			max_hp = 35.0
-			speed = 70.0
-			radius = 13.0
-			attack_damage = 10.0
-			structure_attack_damage = 8.0
-			attack_cooldown_seconds = 1.0
+	configure_from_data(next_type, {})
+
+
+func configure_from_data(next_type: String, data: Dictionary) -> void:
+	var resolved_type := _known_type(next_type)
+	var stats := _default_stats(resolved_type)
+	for key in data.keys():
+		if stats.has(key):
+			stats[key] = data[key]
+	enemy_type = resolved_type
+	max_hp = float(stats.get("max_hp", max_hp))
+	speed = float(stats.get("speed", speed))
+	radius = float(stats.get("radius", radius))
+	attack_damage = float(stats.get("attack_damage", attack_damage))
+	attack_range = float(stats.get("attack_range", attack_range))
+	attack_cooldown_seconds = float(stats.get("attack_cooldown_seconds", attack_cooldown_seconds))
+	structure_attack_damage = float(stats.get("structure_attack_damage", structure_attack_damage))
+	hp = clampf(hp, 0.0, max_hp)
+	if hp <= 0.0:
+		hp = max_hp
+	queue_redraw()
 
 
 func setup(ari: Node2D, world_node: Node = null) -> void:
@@ -74,11 +68,10 @@ func _process(delta: float) -> void:
 		_move_or_attack_attraction(attraction_target, delta)
 		return
 
-	if enemy_type != "flying":
-		var blocking_structure := _find_blocking_structure()
-		if blocking_structure != null:
-			_move_or_attack_structure(blocking_structure, delta)
-			return
+	var blocking_structure := _find_blocking_structure()
+	if blocking_structure != null:
+		_move_or_attack_structure(blocking_structure, delta)
+		return
 
 	var to_target: Vector2 = target.global_position - global_position
 	_face_towards(target.global_position)
@@ -213,34 +206,77 @@ func _draw() -> void:
 	var body_color := Color(0.84, 0.10, 0.10, 1.0)
 	var core_color := Color(0.22, 0.02, 0.02, 1.0)
 	var ring_color := Color(1.0, 0.42, 0.36, 1.0)
+	var outline_width := 2.4
 	match enemy_type:
 		"runner":
 			body_color = Color(1.0, 0.36, 0.14, 1.0)
 			core_color = Color(0.34, 0.08, 0.02, 1.0)
 			ring_color = Color(1.0, 0.74, 0.38, 1.0)
+			outline_width = 2.0
 		"brute":
 			body_color = Color(0.55, 0.05, 0.08, 1.0)
 			core_color = Color(0.12, 0.00, 0.02, 1.0)
 			ring_color = Color(1.0, 0.20, 0.24, 1.0)
-		"flying":
-			body_color = Color(0.56, 0.28, 0.92, 1.0)
-			core_color = Color(0.16, 0.05, 0.30, 1.0)
-			ring_color = Color(0.86, 0.66, 1.0, 1.0)
+			outline_width = 3.5
 	if _hit_flash > 0.0:
-		body_color = Color(1.0, 0.92, 0.70, 1.0)
+		body_color = Color(1.0, 0.82, 0.48, 1.0)
+	draw_circle(Vector2(3.0, 6.0), radius + 5.0, Color(0.0, 0.0, 0.0, 0.34))
+	draw_circle(Vector2.ZERO, radius + 3.5, Color(0.08, 0.00, 0.01, 0.96))
 	draw_circle(Vector2.ZERO, radius, body_color)
 	draw_circle(Vector2.ZERO, radius * 0.45, core_color)
-	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 32, ring_color, 2.0)
+	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 32, ring_color, outline_width)
 	_draw_facing_mark(ring_color)
 	if enemy_type == "runner":
-		draw_line(Vector2(-radius, radius + 2.0), Vector2(radius, radius + 2.0), ring_color, 2.0)
+		draw_line(Vector2(-radius - 6.0, radius + 2.0), Vector2(radius + 3.0, radius + 2.0), ring_color, 2.4)
+		draw_line(Vector2(-radius - 3.0, radius + 7.0), Vector2(radius - 1.0, radius + 7.0), Color(1.0, 0.58, 0.20, 0.70), 1.8)
 	elif enemy_type == "brute":
 		draw_rect(Rect2(Vector2(-radius * 0.75, -radius * 0.75), Vector2(radius * 1.5, radius * 1.5)), Color(0.18, 0.02, 0.03, 0.5), false, 2.0)
-	elif enemy_type == "flying":
-		draw_arc(Vector2(-radius * 0.7, 0.0), radius * 0.75, PI, TAU, 18, ring_color, 2.0)
-		draw_arc(Vector2(radius * 0.7, 0.0), radius * 0.75, PI, TAU, 18, ring_color, 2.0)
+		draw_rect(Rect2(Vector2(-radius * 0.45, -radius * 1.05), Vector2(radius * 0.9, radius * 0.32)), ring_color.darkened(0.12), true)
+	else:
+		draw_line(Vector2(-radius * 0.55, radius * 0.86), Vector2(radius * 0.55, radius * 0.86), ring_color, 1.8)
 	draw_rect(Rect2(Vector2(-14.0, -22.0), Vector2(28.0, 4.0)), Color(0.08, 0.02, 0.02, 0.9), true)
 	draw_rect(Rect2(Vector2(-14.0, -22.0), Vector2(28.0 * hp_ratio, 4.0)), Color(1.0, 0.48, 0.34, 1.0), true)
+	if _hit_flash > 0.0:
+		draw_arc(Vector2.ZERO, radius + 8.0, -PI * 0.1, PI * 1.1, 28, Color(1.0, 0.88, 0.45, 0.72), 3.0)
+
+
+func _known_type(next_type: String) -> String:
+	if ["zombie", "runner", "brute"].has(next_type):
+		return next_type
+	return "zombie"
+
+
+func _default_stats(next_type: String) -> Dictionary:
+	match _known_type(next_type):
+		"runner":
+			return {
+				"max_hp": 22.0,
+				"speed": 118.0,
+				"radius": 10.0,
+				"attack_damage": 7.0,
+				"attack_range": 22.0,
+				"attack_cooldown_seconds": 0.75,
+				"structure_attack_damage": 5.0,
+			}
+		"brute":
+			return {
+				"max_hp": 95.0,
+				"speed": 42.0,
+				"radius": 18.0,
+				"attack_damage": 16.0,
+				"attack_range": 28.0,
+				"attack_cooldown_seconds": 1.25,
+				"structure_attack_damage": 22.0,
+			}
+	return {
+		"max_hp": 35.0,
+		"speed": 70.0,
+		"radius": 13.0,
+		"attack_damage": 10.0,
+		"attack_range": 24.0,
+		"attack_cooldown_seconds": 1.0,
+		"structure_attack_damage": 8.0,
+	}
 
 
 func _draw_facing_mark(mark_color: Color) -> void:

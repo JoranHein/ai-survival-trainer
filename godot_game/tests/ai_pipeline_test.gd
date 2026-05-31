@@ -12,6 +12,8 @@ const PermanentInsightBookScript = preload("res://scripts/ari/PermanentInsightBo
 const WisdomSynthesizerScript = preload("res://scripts/ari/WisdomSynthesizer.gd")
 const AriMindScript = preload("res://scripts/ari/AriMind.gd")
 const SignMindScript = preload("res://scripts/ari/SignMind.gd")
+const EnemyControllerScript = preload("res://scripts/enemies/EnemyController.gd")
+const WaveDirectorScript = preload("res://scripts/world/WaveDirector.gd")
 
 var failures: Array[String] = []
 
@@ -28,6 +30,9 @@ func _run() -> void:
 	await _test_bridge_health_and_raw_validation(bridge)
 	_test_deep_interpretation_contract(bridge)
 	_test_local_combat_signs()
+	_test_local_tower_range_signs()
+	_test_enemy_variety_stats()
+	_test_wave_director_escalates_without_flying()
 	_test_ai_tactical_priority_jobs()
 	_test_memory_records_events()
 	_test_chronicle_validates_scribe_notes()
@@ -179,6 +184,50 @@ func _test_ai_tactical_priority_jobs() -> void:
 		_assert(training_decision.get("job", "") == "train_combat", "%s hint should make Ari train after basic defenses exist" % str(training_case.get("label", "")))
 		_assert(str(training_decision.get("reason", "")).to_lower().contains("prepare") or str(training_decision.get("reason", "")).to_lower().contains("combat"), "%s training reason should explain combat preparation" % str(training_case.get("label", "")))
 
+	for ranged_case in [
+		{"key": "use_tower", "label": "use_tower"},
+		{"key": "train_bow", "label": "train_bow"},
+		{"key": "ranged_attack", "label": "ranged_attack"},
+	]:
+		var tower_decision := ari_mind.choose_daytime_job(_base_mind_context({
+			"wall_count": 2,
+			"bow_tower_count": 1,
+			"priority_hints": {
+				str(ranged_case.get("key", "")): 0.9,
+			},
+		}))
+		_assert(tower_decision.get("job", "") == "use_tower", "%s hint should make Ari use an existing tower" % str(ranged_case.get("label", "")))
+		_assert(str(tower_decision.get("reason", "")).to_lower().contains("tower") or str(tower_decision.get("reason", "")).to_lower().contains("range"), "%s tower reason should explain the ranged tactic" % str(ranged_case.get("label", "")))
+
+	var build_tower_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 2,
+		"bow_tower_count": 0,
+		"priority_hints": {
+			"build_tower": 0.9,
+		},
+	}))
+	_assert(build_tower_decision.get("job", "") == "build_bow_tower", "build_tower hint should make Ari build a tower when defenses exist")
+
+	var runner_pressure_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 2,
+		"aura_orb_count": 1,
+		"bow_tower_count": 1,
+		"enemy_type_counts": {
+			"runner": 2,
+		},
+	}))
+	_assert(["use_tower", "lure_to_aura", "use_cover"].has(str(runner_pressure_decision.get("job", ""))), "runner pressure should push Ari toward active defensive positioning")
+
+	var brute_pressure_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 2,
+		"aura_orb_count": 1,
+		"bow_tower_count": 1,
+		"enemy_type_counts": {
+			"brute": 1,
+		},
+	}))
+	_assert(brute_pressure_decision.get("job", "") == "use_tower" or brute_pressure_decision.get("job", "") == "lure_to_aura", "brute pressure should prefer damage over adding weak walls")
+
 	_assert(ari_mind.has_method("choose_night_tactic"), "AriMind should choose tactical night behavior")
 	if not ari_mind.has_method("choose_night_tactic"):
 		ari_mind.free()
@@ -214,6 +263,22 @@ func _test_ai_tactical_priority_jobs() -> void:
 		},
 	}))
 	_assert(night_aura_decision.get("job", "") == "lure_to_aura", "night aura hint should keep Ari luring through an existing orb")
+
+	var night_tower_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 2,
+		"nearest_enemy_distance": 112.0,
+		"ari_hp_ratio": 0.9,
+		"wall_count": 1,
+		"bow_tower_count": 1,
+		"has_valid_tower": true,
+		"priority_hints": {
+			"use_tower": 0.9,
+			"ranged_attack": 0.9,
+		},
+	}))
+	_assert(night_tower_decision.get("job", "") == "use_tower", "night tower hints should keep Ari using a tower perch")
 
 	var close_enemy_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
 		"is_night": true,
@@ -260,6 +325,54 @@ func _test_local_combat_signs() -> void:
 		var hints: Dictionary = interpretation.get("priority_hints", {})
 		_assert(float(hints.get("combat_training", 0.0)) > 0.0, "local SignMind should read '%s' as combat training" % sign_text)
 	sign_mind.free()
+
+
+func _test_local_tower_range_signs() -> void:
+	var sign_mind: SignMind = SignMindScript.new()
+	for sign_text in [
+		"arrows keep teeth far away",
+		"build a mountain where arrows rain",
+		"shoot from above",
+		"height keeps teeth below",
+	]:
+		var interpretation := sign_mind.interpret_sign(sign_text)
+		var hints: Dictionary = interpretation.get("priority_hints", {})
+		_assert(float(hints.get("range", 0.0)) > 0.0 or float(hints.get("build_tower", 0.0)) > 0.0, "local SignMind should read '%s' as range or tower intent" % sign_text)
+	sign_mind.free()
+
+
+func _test_enemy_variety_stats() -> void:
+	var zombie: EnemyController = EnemyControllerScript.new()
+	zombie.configure_type("zombie")
+	var runner: EnemyController = EnemyControllerScript.new()
+	runner.configure_type("runner")
+	var brute: EnemyController = EnemyControllerScript.new()
+	brute.configure_type("brute")
+
+	_assert(float(runner.get("speed")) > float(zombie.get("speed")), "runner should be faster than zombie")
+	_assert(float(runner.get("max_hp")) < float(zombie.get("max_hp")), "runner should have lower HP than zombie")
+	_assert(float(runner.get("structure_attack_damage")) < float(zombie.get("structure_attack_damage")), "runner should have lower wall damage than zombie")
+	_assert(float(brute.get("speed")) < float(zombie.get("speed")), "brute should be slower than zombie")
+	_assert(float(brute.get("max_hp")) > float(zombie.get("max_hp")), "brute should have higher HP than zombie")
+	_assert(float(brute.get("structure_attack_damage")) > float(zombie.get("structure_attack_damage")), "brute should have higher wall damage than zombie")
+
+	zombie.free()
+	runner.free()
+	brute.free()
+
+
+func _test_wave_director_escalates_without_flying() -> void:
+	var director: WaveDirector = WaveDirectorScript.new()
+	_assert(director.has_method("choose_enemy_type_for_day"), "WaveDirector should expose deterministic enemy type choice")
+	if not director.has_method("choose_enemy_type_for_day"):
+		director.free()
+		return
+	_assert(director.call("choose_enemy_type_for_day", 1, 0.01) == "zombie", "day 1 should only spawn baseline zombies")
+	_assert(director.call("choose_enemy_type_for_day", 2, 0.10) == "runner", "day 2 should begin adding runners")
+	_assert(director.call("choose_enemy_type_for_day", 3, 0.05) == "brute", "day 3 should begin adding brutes")
+	for roll in [0.0, 0.08, 0.24, 0.55, 0.99]:
+		_assert(director.call("choose_enemy_type_for_day", 5, roll) != "flying", "Enemy Variety v1 should not spawn flying enemies")
+	director.free()
 
 
 func _base_mind_context(overrides: Dictionary) -> Dictionary:

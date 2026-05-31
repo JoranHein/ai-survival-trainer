@@ -24,13 +24,13 @@ const HINT_ORDER := [
 
 const KEYWORDS := {
 	"combat_training": ["train", "training", "combat", "fight", "hurt", "attack", "weapon", "weapons", "sword", "bow", "arrow", "arrows", "kill", "teeth", "danger", "hands", "prepare", "ready", "hit", "hits", "hitting"],
-	"range": ["bow", "arrow", "arrows", "distance", "far"],
+	"range": ["bow", "arrow", "arrows", "shoot", "shooting", "range", "ranged", "distance", "far", "away"],
 	"wall": ["wall", "walls", "stone", "fortress", "protect"],
 	"aura_orb": ["light", "circle", "orb", "ward"],
 	"mining": ["mine", "mining", "rock", "rocks", "stone"],
 	"farm_food": ["farm", "food", "eat", "eating", "hungry", "hunger", "stomach", "crop", "crops", "harvest", "fruit"],
 	"build_trap": ["trap", "traps", "spike", "spikes", "floor", "ground", "punish", "snare"],
-	"build_tower": ["tower", "towers", "height", "high", "mountain", "perch", "rain"],
+	"build_tower": ["tower", "towers", "height", "high", "above", "below", "mountain", "perch", "rain"],
 	"build_tar_pit": ["slow", "slows", "mud", "tar", "sticky", "stuck", "sink", "mire"],
 	"build_fear_lantern": ["lantern", "lamp", "fire", "warm", "warmth", "brave", "courage", "fear", "afraid", "safe", "safety"],
 	"build_decoy_idol": ["decoy", "idol", "bait", "lure", "attract", "distract", "distraction", "false", "dummy"],
@@ -470,7 +470,7 @@ func _job_matches_hint(hint_name: String, current_job: String) -> bool:
 		"combat_training":
 			return current_job == "train_combat"
 		"range", "build_tower":
-			return current_job == "build_bow_tower"
+			return current_job == "build_bow_tower" or current_job == "use_tower"
 		"wall":
 			return current_job == "build_wall"
 		"aura_orb":

@@ -190,9 +190,10 @@ func _default_structures() -> Dictionary:
 			"stone_cost": 4,
 		},
 		"bow_tower": {
-			"display_name": "Bow Tower",
+			"display_name": "Tower",
 			"hp": 34.0,
 			"range": 150.0,
+			"range_bonus": 32.0,
 			"damage": 10.0,
 			"shot_cooldown_seconds": 0.7,
 			"stone_cost": 8,

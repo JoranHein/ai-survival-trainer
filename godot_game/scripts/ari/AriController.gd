@@ -318,6 +318,8 @@ func get_action_cue() -> Dictionary:
 		return _make_action_cue("repair", phase, Color(0.48, 0.88, 1.0, 1.0))
 	if action.find("flee") >= 0:
 		return _make_action_cue("flee", phase, Color(1.0, 0.46, 0.34, 1.0))
+	if action.find("tower") >= 0 or action.find("range") >= 0 or action.find("shoot") >= 0:
+		return _make_action_cue("range", phase, Color(1.0, 0.78, 0.30, 1.0))
 	if action.find("cover") >= 0 or action.find("lure") >= 0 or action.find("aura") >= 0:
 		return _make_action_cue("wait", phase, Color(0.70, 0.88, 1.0, 1.0))
 	if (
@@ -454,6 +456,8 @@ func _moving_action_for_job(job: String) -> String:
 			return "moving to wall cover"
 		"lure_to_aura":
 			return "moving to aura lure"
+		"use_tower":
+			return "moving to tower"
 		"flee":
 			return "fleeing"
 	return "moving to %s" % job
@@ -461,12 +465,22 @@ func _moving_action_for_job(job: String) -> String:
 
 func _draw() -> void:
 	var body_color := Color(0.10, 0.42, 1.0, 1.0) if is_alive() else Color(0.22, 0.25, 0.30, 1.0)
+	var outline_color := Color(0.78, 0.94, 1.0, 1.0) if is_alive() else Color(0.80, 0.86, 0.92, 1.0)
 	if _damage_flash > 0.0:
-		body_color = Color(1.0, 0.90, 0.62, 1.0)
+		body_color = Color(1.0, 0.72, 0.46, 1.0)
+		outline_color = Color(1.0, 0.96, 0.72, 1.0)
+	draw_circle(Vector2(3.0, 7.0), radius + 7.0, Color(0.0, 0.0, 0.0, 0.34))
 	_draw_need_state_cues()
+	draw_circle(Vector2.ZERO, radius + 5.0, Color(0.02, 0.04, 0.08, 0.96))
+	draw_arc(Vector2.ZERO, radius + 7.0, 0.0, TAU, 42, Color(0.48, 0.84, 1.0, 0.40), 2.0)
 	draw_circle(Vector2.ZERO, radius, body_color)
-	draw_circle(Vector2(5.0, -5.0), 3.0, Color(0.85, 0.95, 1.0, 1.0))
-	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 32, Color(0.75, 0.9, 1.0, 1.0), 2.0)
+	draw_circle(Vector2(5.0, -5.0), 3.4, Color(0.92, 0.99, 1.0, 1.0))
+	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 36, outline_color, 3.0)
+	if _damage_flash > 0.0:
+		draw_arc(Vector2.ZERO, radius + 10.0, -PI * 0.20, PI * 1.20, 32, Color(1.0, 0.44, 0.28, 0.72), 3.0)
+	if not is_alive():
+		draw_line(Vector2(-9.0, -9.0), Vector2(9.0, 9.0), Color(0.96, 0.98, 1.0, 0.95), 3.0)
+		draw_line(Vector2(9.0, -9.0), Vector2(-9.0, 9.0), Color(0.96, 0.98, 1.0, 0.95), 3.0)
 	_draw_action_cue(get_action_cue())
 
 
@@ -538,6 +552,14 @@ func _draw_action_symbol(kind: String, center: Vector2, color: Color) -> void:
 			draw_line(center + Vector2(-5.0, 5.0), center + Vector2(5.0, -5.0), bright, 2.0)
 			draw_line(center + Vector2(2.0, -7.0), center + Vector2(7.0, -2.0), color, 1.6)
 			draw_circle(center + Vector2(-5.0, 5.0), 2.0, Color(color.r, color.g, color.b, 0.64))
+		"range":
+			draw_arc(center + Vector2(-1.0, 0.0), 7.0, -0.8, 0.8, 16, bright, 2.0)
+			draw_line(center + Vector2(-7.0, 0.0), center + Vector2(7.0, 0.0), bright, 2.0)
+			draw_colored_polygon(PackedVector2Array([
+				center + Vector2(7.0, -4.0),
+				center + Vector2(13.0, 0.0),
+				center + Vector2(7.0, 4.0),
+			]), color)
 		"wait":
 			draw_colored_polygon(PackedVector2Array([
 				center + Vector2(0.0, -7.0),

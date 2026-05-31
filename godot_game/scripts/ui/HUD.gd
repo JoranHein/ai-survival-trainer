@@ -17,6 +17,7 @@ func update_state(state: Dictionary) -> void:
 	var ari_hp := float(state.get("ari_hp", 0.0))
 	var ari_max_hp := float(state.get("ari_max_hp", 0.0))
 	var enemy_count := int(state.get("enemy_count", 0))
+	var enemy_type_counts := _enemy_type_counts(state)
 	var stone := int(state.get("stone", 0))
 	var food := int(state.get("food", 0))
 	var selected_build_type := str(state.get("selected_build_type", "wall"))
@@ -59,7 +60,7 @@ func update_state(state: Dictionary) -> void:
 		short_upgrade_summary = permanent_summary.substr(0, 31) + "..."
 
 	var status_lines := [
-		_status_header_line(day, phase, time_left, ari_hp, ari_max_hp, enemy_count, stone, food),
+		_status_header_line(day, phase, time_left, ari_hp, ari_max_hp, enemy_count, enemy_type_counts, stone, food),
 	]
 	var mind_lines := [
 		"%s    Build: %s" % [
@@ -134,17 +135,35 @@ func _progression(state: Dictionary) -> Dictionary:
 	return {}
 
 
-func _status_header_line(day: int, phase: String, time_left: float, ari_hp: float, ari_max_hp: float, enemy_count: int, stone: int, food: int) -> String:
-	return "D%d %s %.0fs   HP %.0f/%.0f   E%d   Stone %d Food %d" % [
+func _enemy_type_counts(state: Dictionary) -> Dictionary:
+	var counts = state.get("enemy_type_counts", {})
+	if typeof(counts) == TYPE_DICTIONARY:
+		return counts
+	return {}
+
+
+func _status_header_line(day: int, phase: String, time_left: float, ari_hp: float, ari_max_hp: float, enemy_count: int, enemy_type_counts: Dictionary, stone: int, food: int) -> String:
+	return "D%d %s %.0fs   HP %.0f/%.0f   %s   Stone %d Food %d" % [
 		day,
 		phase,
 		time_left,
 		ari_hp,
 		ari_max_hp,
-		enemy_count,
+		_enemy_mix_token(enemy_count, enemy_type_counts),
 		stone,
 		food,
 	]
+
+
+func _enemy_mix_token(enemy_count: int, counts: Dictionary) -> String:
+	var zombies := int(counts.get("zombie", 0))
+	var runners := int(counts.get("runner", 0))
+	var brutes := int(counts.get("brute", 0))
+	if enemy_count <= 0:
+		return "E0"
+	if runners <= 0 and brutes <= 0:
+		return "E%d Z%d" % [enemy_count, zombies]
+	return "E%d Z%d R%d B%d" % [enemy_count, zombies, runners, brutes]
 
 
 func _hp_meter(value: float, maximum: float) -> String:

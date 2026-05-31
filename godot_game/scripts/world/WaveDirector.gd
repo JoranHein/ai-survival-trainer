@@ -3,13 +3,16 @@ extends Node
 
 @export var spawn_interval_seconds := 3.0
 @export var max_enemies := 8
+@export var enemy_data_path := "res://data/enemies.json"
 
 var _world: Node = null
 var _spawn_accumulator := 0.0
+var _wave_rules: Array = []
 
 
 func setup(world: Node) -> void:
 	_world = world
+	_load_wave_rules()
 
 
 func restart() -> void:
@@ -35,17 +38,69 @@ func advance(delta: float, is_night: bool, ari_alive: bool) -> void:
 
 
 func _choose_enemy_type() -> String:
-	if _world == null:
-		return "zombie"
-	var day := 1
-	var day_night = _world.get("day_night")
-	if day_night != null:
-		day = int(day_night.get("day"))
-	var roll := randf()
-	if day >= 4 and roll < 0.12:
-		return "flying"
-	if day >= 3 and roll < 0.18:
+	return choose_enemy_type_for_day(_current_day())
+
+
+func choose_enemy_type_for_day(day: int, roll := -1.0) -> String:
+	if _wave_rules.is_empty():
+		_load_wave_rules()
+	var rule := _wave_rule_for_day(day)
+	var brute_chance := clampf(float(rule.get("brute_chance", 0.0)), 0.0, 1.0)
+	var runner_chance := clampf(float(rule.get("runner_chance", 0.0)), 0.0, 1.0 - brute_chance)
+	var spawn_roll := randf() if roll < 0.0 else clampf(roll, 0.0, 1.0)
+	if spawn_roll < brute_chance:
 		return "brute"
-	if day >= 2 and roll < 0.38:
+	if spawn_roll < brute_chance + runner_chance:
 		return "runner"
 	return "zombie"
+
+
+func _current_day() -> int:
+	if _world == null:
+		return 1
+	var day_night = _world.get("day_night")
+	if day_night == null:
+		return 1
+	return maxi(1, int(day_night.get("day")))
+
+
+func _load_wave_rules() -> void:
+	_wave_rules = []
+	var file := FileAccess.open(enemy_data_path, FileAccess.READ)
+	if file != null:
+		var parsed = JSON.parse_string(file.get_as_text())
+		if typeof(parsed) == TYPE_DICTIONARY:
+			var raw_rules = parsed.get("waves", [])
+			if typeof(raw_rules) == TYPE_ARRAY:
+				for raw_rule in raw_rules:
+					if typeof(raw_rule) != TYPE_DICTIONARY:
+						continue
+					_wave_rules.append({
+						"from_day": maxi(1, int(raw_rule.get("from_day", 1))),
+						"runner_chance": clampf(float(raw_rule.get("runner_chance", 0.0)), 0.0, 1.0),
+						"brute_chance": clampf(float(raw_rule.get("brute_chance", 0.0)), 0.0, 1.0),
+					})
+	if _wave_rules.is_empty():
+		_wave_rules = _default_wave_rules()
+	_wave_rules.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a.get("from_day", 1)) < int(b.get("from_day", 1))
+	)
+
+
+func _wave_rule_for_day(day: int) -> Dictionary:
+	var selected: Dictionary = _default_wave_rules()[0]
+	if not _wave_rules.is_empty():
+		selected = _wave_rules[0]
+	for rule in _wave_rules:
+		if int(rule.get("from_day", 1)) <= day:
+			selected = rule
+	return selected
+
+
+func _default_wave_rules() -> Array:
+	return [
+		{"from_day": 1, "runner_chance": 0.0, "brute_chance": 0.0},
+		{"from_day": 2, "runner_chance": 0.25, "brute_chance": 0.0},
+		{"from_day": 3, "runner_chance": 0.28, "brute_chance": 0.12},
+		{"from_day": 5, "runner_chance": 0.35, "brute_chance": 0.18},
+	]

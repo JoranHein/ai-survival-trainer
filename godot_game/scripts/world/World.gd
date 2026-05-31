@@ -29,6 +29,7 @@ const STORM_ROD_BUILD_ID := "storm_rod"
 @export var thorn_totem_scene: PackedScene
 @export var repair_bench_scene: PackedScene
 @export var storm_rod_scene: PackedScene
+@export var enemy_data_path := "res://data/enemies.json"
 
 @onready var resource_system: Node = $ResourceSystem
 @onready var day_night: Node = $DayNightCycle
@@ -90,6 +91,12 @@ var _hunger_pressure_reported := false
 var _stamina_pressure_reported := false
 var _near_death_reported := false
 var _ai_sign_request_id := 0
+var _ari_ranged_cooldown := 0.0
+var _ari_ranged_flash_time := 0.0
+var _ari_ranged_flash_from := Vector2.ZERO
+var _ari_ranged_flash_to := Vector2.ZERO
+var _enemy_data := {}
+var _noticed_enemy_types := {}
 
 
 func _ready() -> void:
@@ -98,6 +105,7 @@ func _ready() -> void:
 		resource_system.connect("changed", Callable(self, "_on_resource_changed"))
 	if permanent_progression.has_signal("changed"):
 		permanent_progression.connect("changed", Callable(self, "_on_permanent_progression_changed"))
+	_load_enemy_data()
 	wave_director.setup(self)
 	ai_bridge = AIBridge.new()
 	add_child(ai_bridge)
@@ -107,6 +115,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_status_message(delta)
+	_update_ari_ranged_attack_timers(delta)
 	day_night.advance(delta)
 	wave_director.advance(delta, day_night.is_night(), _is_ari_alive())
 	_position_mine_node()
@@ -197,6 +206,9 @@ func start_run() -> void:
 	latest_lesson_title = ""
 	_clear_ari_intent()
 	_reset_survival_pressure_flags()
+	_ari_ranged_cooldown = 0.0
+	_ari_ranged_flash_time = 0.0
+	_noticed_enemy_types = {}
 	status_message = ""
 	status_message_time = 0.0
 	latest_thought = ""
@@ -303,24 +315,25 @@ func stage_visual_review_moment(moment: String) -> void:
 			resource_system.call("add_stone", 84)
 			_place_visual_review_defense_layout(arena)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 26.0)
-			commit_sign("the circle should eat the dead")
-			sign_interpretation = "Ari thinks the sign means to pull enemies through the Aura Orb."
+			commit_sign("build a mountain where arrows rain and the dead walk through light")
+			sign_interpretation = "Ari reads height, arrows, and light. The tower can shoot while they cross the orb."
 			sign_priority_hints = _normalize_ai_priority_hints({
-				"lure_to_aura": 0.95,
-				"place_aura_orb": 0.2,
+				"use_tower": 0.95,
+				"ranged_attack": 0.9,
+				"lure_to_aura": 0.45,
 			})
 			sign_strength = 0.80
 			sign_resonance = 0.78
-			ai_survival_theory = "lure_to_aura"
+			ai_survival_theory = "tower_range"
 			ai_status = "AI staged"
-			selected_build_type = AURA_ORB_BUILD_ID
+			selected_build_type = BOW_TOWER_BUILD_ID
 			build_grid.call("set_selected_build_type", selected_build_type)
-			_set_status_message("Aura Orb radius active.", 2.0)
-			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.82, arena.size.y * 0.40), "zombie")
+			_set_status_message("Tower range active.", 2.0)
+			_spawn_enemy(arena.get_center() + Vector2(260.0, -112.0), "zombie")
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.58, arena.size.y * 0.84), "runner")
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.18, arena.size.y * 0.78), "brute")
-			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.75, arena.size.y * 0.18), "flying")
-			_advance_ari_night_tactic(1.0)
+			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.75, arena.size.y * 0.18), "runner")
+			_advance_ari_night_tactic(3.0)
 			_show_current_job_thought(true)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 999.0)
 		"ari_dead_or_damaged":
@@ -572,6 +585,10 @@ func get_enemy_count() -> int:
 	return enemies.size()
 
 
+func get_enemy_type_counts() -> Dictionary:
+	return _get_enemy_type_counts()
+
+
 func spawn_zombie_at_edge() -> void:
 	spawn_enemy_at_edge("zombie")
 
@@ -588,19 +605,76 @@ func _spawn_enemy(spawn_position: Vector2, enemy_type := "zombie") -> void:
 	if zombie_scene == null or ari == null:
 		return
 
+	var resolved_enemy_type := _normalize_enemy_type(enemy_type)
 	var enemy := zombie_scene.instantiate() as Node2D
 	add_child(enemy)
 	enemy.global_position = spawn_position
-	if enemy.has_method("configure_type"):
-		enemy.call("configure_type", enemy_type)
+	if enemy.has_method("configure_from_data"):
+		enemy.call("configure_from_data", resolved_enemy_type, _get_enemy_data(resolved_enemy_type))
+	elif enemy.has_method("configure_type"):
+		enemy.call("configure_type", resolved_enemy_type)
 	enemy.connect("died", Callable(self, "_on_enemy_died"))
 	enemy.call("setup", ari, self)
 	enemies.append(enemy)
 	ari_memory.record_event("enemy_spawned", {
-		"enemy_type": enemy_type,
+		"enemy_type": resolved_enemy_type,
 		"day": day_night.day,
 		"phase": day_night.phase,
 	})
+	_show_new_enemy_type_thought(resolved_enemy_type)
+
+
+func _load_enemy_data() -> void:
+	_enemy_data = {}
+	var file := FileAccess.open(enemy_data_path, FileAccess.READ)
+	if file == null:
+		return
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var enemies_data = parsed.get("enemies", {})
+	if typeof(enemies_data) == TYPE_DICTIONARY:
+		_enemy_data = enemies_data
+
+
+func _get_enemy_data(enemy_type: String) -> Dictionary:
+	if typeof(_enemy_data) != TYPE_DICTIONARY:
+		return {}
+	var data = _enemy_data.get(_normalize_enemy_type(enemy_type), {})
+	if typeof(data) == TYPE_DICTIONARY:
+		return data
+	return {}
+
+
+func _normalize_enemy_type(enemy_type: String) -> String:
+	if ["zombie", "runner", "brute"].has(enemy_type):
+		return enemy_type
+	return "zombie"
+
+
+func _get_enemy_type_counts() -> Dictionary:
+	var counts := {
+		"zombie": 0,
+		"runner": 0,
+		"brute": 0,
+	}
+	for enemy in enemies:
+		if not is_instance_valid(enemy):
+			continue
+		var enemy_type := _normalize_enemy_type(str(enemy.get("enemy_type")))
+		counts[enemy_type] = int(counts.get(enemy_type, 0)) + 1
+	return counts
+
+
+func _show_new_enemy_type_thought(enemy_type: String) -> void:
+	if enemy_type == "zombie" or bool(_noticed_enemy_types.get(enemy_type, false)):
+		return
+	_noticed_enemy_types[enemy_type] = true
+	match enemy_type:
+		"runner":
+			_show_ari_thought("That one is too fast. Walls may not be enough.", true)
+		"brute":
+			_show_ari_thought("That thing breaks stone like it is afraid of silence.", true)
 
 
 func clear_enemies() -> void:
@@ -762,6 +836,7 @@ func _emit_state() -> void:
 		"ari_max_hp": float(ari.get("max_hp")) if ari != null else 0.0,
 		"ari_alive": _is_ari_alive(),
 		"enemy_count": enemies.size(),
+		"enemy_type_counts": _get_enemy_type_counts(),
 		"build_mode": build_mode,
 		"selected_build_type": selected_build_type,
 		"selected_build_name": _get_selected_build_name(),
@@ -1186,6 +1261,8 @@ func _advance_ari_daytime(delta: float) -> void:
 		"train_combat":
 			_set_ari_intent(_get_station_spot(training_dummy, "get_training_spot"), "Train")
 			ari.call("advance_training_job", delta, true, reason)
+		"use_tower":
+			_advance_ari_tower_job(delta, reason)
 		"use_cover":
 			_advance_ari_cover_job(delta, reason)
 		"lure_to_aura":
@@ -1206,6 +1283,8 @@ func _advance_ari_night_tactic(delta: float) -> void:
 	var job := str(decision.get("job", "wait_or_idle"))
 	var reason := str(decision.get("reason", "Night has started"))
 	match job:
+		"use_tower":
+			_advance_ari_tower_job(delta, reason)
 		"use_cover":
 			_advance_ari_cover_job(delta, reason)
 		"lure_to_aura":
@@ -1253,6 +1332,22 @@ func _advance_ari_repair_job(delta: float, reason: String) -> void:
 		})
 
 
+func _advance_ari_tower_job(delta: float, reason: String) -> void:
+	var tower := _nearest_valid_structure(bow_towers)
+	if tower == null:
+		if day_night.is_night():
+			_advance_ari_flee_job(delta, "The tower is gone; find another answer")
+		else:
+			ari.call("stop_daytime_job", "No tower perch available")
+		return
+
+	var target_position := _get_tower_perch_position(tower)
+	_set_ari_intent(target_position, "Tower")
+	var arrived: bool = bool(ari.call("advance_move_job", delta, "use_tower", reason, target_position, "using tower perch"))
+	if arrived:
+		_advance_ari_ranged_attack(delta, tower)
+
+
 func _advance_ari_cover_job(delta: float, reason: String) -> void:
 	var cover := _find_cover_position()
 	if not bool(cover.get("valid", false)):
@@ -1285,6 +1380,33 @@ func _advance_ari_flee_job(delta: float, reason: String) -> void:
 	ari.call("advance_move_job", delta, "flee", reason, target_position, "fleeing")
 
 
+func _advance_ari_ranged_attack(_delta: float, tower: Node2D) -> void:
+	if _ari_ranged_cooldown > 0.0 or ari == null or not _is_ari_alive():
+		return
+	var origin := ari.global_position
+	var range_radius := _get_tower_range(tower)
+	var target_enemy := _nearest_enemy_in_range(origin, range_radius)
+	if target_enemy == null:
+		return
+
+	var target_position := target_enemy.global_position
+	var damage := _get_tower_damage(tower)
+	var combat_stats := _get_ari_combat_stats()
+	damage *= 1.0 + float(combat_stats.get("damage_bonus", 0.0))
+	target_enemy.call("take_damage", damage)
+	if is_instance_valid(tower) and tower.has_method("record_shot"):
+		tower.call("record_shot")
+	_ari_ranged_cooldown = _get_tower_shot_cooldown(tower)
+	_ari_ranged_flash_time = 0.35
+	_ari_ranged_flash_from = origin
+	_ari_ranged_flash_to = target_position
+	ari_memory.record_event("ari_ranged_hit", {
+		"damage": damage,
+		"day": day_night.day,
+		"phase": day_night.phase,
+	})
+
+
 func _get_ari_mind_context() -> Dictionary:
 	return {
 		"is_night": day_night.is_night(),
@@ -1312,6 +1434,7 @@ func _get_ari_mind_context() -> Dictionary:
 		"thorn_totem_count": thorn_totems.size(),
 		"repair_bench_count": repair_benches.size(),
 		"storm_rod_count": storm_rods.size(),
+		"enemy_type_counts": _get_enemy_type_counts(),
 		"damaged_structure_count": _get_damaged_structure_count(),
 		"lowest_structure_hp_ratio": _get_lowest_structure_hp_ratio(),
 		"combat_stats": _get_ari_combat_stats(),
@@ -1330,11 +1453,13 @@ func _get_night_tactic_context() -> Dictionary:
 	var context := _get_ari_mind_context()
 	var cover := _find_cover_position()
 	var lure := _find_aura_lure_position()
+	var tower := _nearest_valid_structure(bow_towers)
 	context["enemy_count"] = enemies.size()
 	context["nearest_enemy_distance"] = _nearest_enemy_distance_from(ari.global_position if ari != null else _get_defense_anchor())
 	context["ari_hp_ratio"] = _get_ari_hp_ratio()
 	context["has_valid_cover"] = bool(cover.get("valid", false))
 	context["has_valid_aura"] = bool(lure.get("valid", false))
+	context["has_valid_tower"] = tower != null
 	return context
 
 
@@ -1633,6 +1758,33 @@ func _find_aura_lure_position() -> Dictionary:
 	}
 
 
+func _get_tower_perch_position(tower: Node2D) -> Vector2:
+	if is_instance_valid(tower) and tower.has_method("get_perch_position"):
+		var perch = tower.call("get_perch_position")
+		if typeof(perch) == TYPE_VECTOR2:
+			return perch
+	return tower.global_position + Vector2(0.0, -18.0) if is_instance_valid(tower) else _get_defense_wait_position()
+
+
+func _get_tower_range(tower: Node2D) -> float:
+	if is_instance_valid(tower) and tower.has_method("get_range_radius"):
+		return maxf(float(tower.call("get_range_radius")), 32.0)
+	var data := _get_bow_tower_data()
+	return maxf(float(data.get("range", 150.0)) + float(data.get("range_bonus", 0.0)), 32.0)
+
+
+func _get_tower_damage(tower: Node2D) -> float:
+	if is_instance_valid(tower) and tower.has_method("get_attack_damage"):
+		return maxf(float(tower.call("get_attack_damage")), 1.0)
+	return maxf(float(_get_bow_tower_data().get("damage", 10.0)), 1.0)
+
+
+func _get_tower_shot_cooldown(tower: Node2D) -> float:
+	if is_instance_valid(tower) and tower.has_method("get_shot_cooldown_seconds"):
+		return maxf(float(tower.call("get_shot_cooldown_seconds")), 0.15)
+	return maxf(float(_get_bow_tower_data().get("shot_cooldown_seconds", 0.7)), 0.15)
+
+
 func _find_flee_position() -> Vector2:
 	var origin := ari.global_position if ari != null else _get_defense_anchor()
 	var nearest_enemy := get_nearest_enemy(origin)
@@ -1701,6 +1853,22 @@ func _nearest_enemy_distance_from(point: Vector2) -> float:
 	if nearest_enemy == null:
 		return INF
 	return point.distance_to(nearest_enemy.global_position)
+
+
+func _nearest_enemy_in_range(point: Vector2, range_radius: float) -> Node2D:
+	var target: Node2D = null
+	var best_distance := INF
+	for enemy in enemies:
+		if not is_instance_valid(enemy) or not enemy.has_method("take_damage"):
+			continue
+		var enemy_node := enemy as Node2D
+		if enemy_node == null:
+			continue
+		var distance := point.distance_to(enemy_node.global_position)
+		if distance <= range_radius and distance < best_distance:
+			target = enemy_node
+			best_distance = distance
+	return target
 
 
 func _is_position_too_dangerous(point: Vector2, danger_distance := 42.0) -> bool:
@@ -1798,7 +1966,7 @@ func _action_for_build_type(build_type: String) -> String:
 	if build_type == SPIKE_TRAP_BUILD_ID:
 		return "setting spike trap"
 	if build_type == BOW_TOWER_BUILD_ID:
-		return "building bow tower"
+		return "building tower"
 	if build_type == TAR_PIT_BUILD_ID:
 		return "digging tar pit"
 	if build_type == FEAR_LANTERN_BUILD_ID:
@@ -1894,7 +2062,7 @@ func _get_build_name(build_type: String) -> String:
 	if build_type == BOW_TOWER_BUILD_ID:
 		if resource_system != null and resource_system.has_method("get_structure_display_name"):
 			return str(resource_system.call("get_structure_display_name", BOW_TOWER_BUILD_ID))
-		return "Bow Tower"
+		return "Tower"
 	if build_type == TAR_PIT_BUILD_ID:
 		if resource_system != null and resource_system.has_method("get_structure_display_name"):
 			return str(resource_system.call("get_structure_display_name", TAR_PIT_BUILD_ID))
@@ -1930,7 +2098,8 @@ func _get_selected_preview_radius() -> float:
 	if selected_build_type == AURA_ORB_BUILD_ID:
 		return float(_get_aura_orb_data().get("radius", 96.0))
 	if selected_build_type == BOW_TOWER_BUILD_ID:
-		return float(_get_bow_tower_data().get("range", 150.0))
+		var tower_data := _get_bow_tower_data()
+		return float(tower_data.get("range", 150.0)) + float(tower_data.get("range_bonus", 0.0))
 	if selected_build_type == TAR_PIT_BUILD_ID:
 		return float(_get_tar_pit_data().get("slow_radius", 58.0))
 	if selected_build_type == FEAR_LANTERN_BUILD_ID:
@@ -2021,9 +2190,10 @@ func _get_spike_trap_cost() -> Dictionary:
 
 func _get_bow_tower_data() -> Dictionary:
 	var data := {
-		"display_name": "Bow Tower",
+		"display_name": "Tower",
 		"hp": 34.0,
 		"range": 150.0,
+		"range_bonus": 32.0,
 		"damage": 10.0,
 		"shot_cooldown_seconds": 0.7,
 		"stone_cost": 8,
@@ -2035,6 +2205,7 @@ func _get_bow_tower_data() -> Dictionary:
 	var effects := _get_run_build_effects()
 	data["damage"] = float(data.get("damage", 10.0)) * float(effects.get("base_damage_multiplier", 1.0)) * (1.0 + float(effects.get("bow_strength", 0.0)) * 0.35)
 	data["range"] = float(data.get("range", 150.0)) * (1.0 + float(effects.get("attack_range_strength", 0.0)) * 0.25)
+	data["range_bonus"] = float(data.get("range_bonus", 32.0)) * (1.0 + float(effects.get("attack_range_strength", 0.0)) * 0.25)
 	return data
 
 
@@ -2368,6 +2539,14 @@ func _set_status_message(message: String, seconds := 2.0) -> void:
 	status_message_time = seconds if message != "" else 0.0
 
 
+func _update_ari_ranged_attack_timers(delta: float) -> void:
+	var safe_delta := maxf(delta, 0.0)
+	_ari_ranged_cooldown = maxf(0.0, _ari_ranged_cooldown - safe_delta)
+	if _ari_ranged_flash_time > 0.0:
+		_ari_ranged_flash_time = maxf(0.0, _ari_ranged_flash_time - safe_delta)
+		queue_redraw()
+
+
 func _update_status_message(delta: float) -> void:
 	if status_message_time <= 0.0:
 		return
@@ -2402,6 +2581,8 @@ func _get_sign_action_focus(ari_job: String, ari_job_reason: String) -> String:
 		return "AI pull: cover -> Ari is following it."
 	if ari_job == "lure_to_aura":
 		return "AI pull: lure to light -> Ari is following it."
+	if ari_job == "use_tower":
+		return "AI pull: tower range -> Ari is following it."
 	if ai_hint == "repair" and ari_job_reason.to_lower().find("repair") >= 0:
 		return "AI pull: repair -> Ari is reporting the gap."
 	if sign_mind == null or not sign_mind.has_method("describe_action_focus"):
@@ -2475,6 +2656,7 @@ func _build_ai_deep_interpretation_payload() -> Dictionary:
 			"wall_count": walls.size(),
 			"aura_orb_count": aura_orbs.size(),
 			"enemy_count": enemies.size(),
+			"enemy_type_counts": _get_enemy_type_counts(),
 			"known_enemy_types": _known_enemy_types(),
 			"structures": _ai_structure_state(),
 		},
@@ -2504,7 +2686,11 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 	))
 	_set_hint_max(normalized, "combat_training", maxf(
 		maxf(float(normalized.get("train_combat", 0.0)), float(normalized.get("fight", 0.0))),
-		float(normalized.get("prepare_weapon", 0.0))
+		maxf(float(normalized.get("prepare_weapon", 0.0)), float(normalized.get("train_bow", 0.0)))
+	))
+	_set_hint_max(normalized, "build_tower", maxf(
+		float(normalized.get("build_tower", 0.0)),
+		float(normalized.get("use_tower", 0.0)) * 0.35
 	))
 	_set_hint_max(normalized, "defensive_wait", maxf(
 		maxf(float(normalized.get("wait_or_idle", 0.0)), float(normalized.get("use_existing_wall", 0.0))),
@@ -2512,8 +2698,8 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 	))
 	_set_hint_max(normalized, "repair_structure", float(normalized.get("repair", 0.0)))
 	_set_hint_max(normalized, "range", maxf(
-		float(normalized.get("kite", 0.0)),
-		float(normalized.get("flee", 0.0))
+		maxf(float(normalized.get("kite", 0.0)), float(normalized.get("flee", 0.0))),
+		maxf(float(normalized.get("train_bow", 0.0)), float(normalized.get("ranged_attack", 0.0)))
 	))
 	return normalized
 
@@ -2643,6 +2829,8 @@ func _show_structure_destroyed_thought(structure_type: String) -> void:
 			_show_ari_thought("The wall is not safety anymore. I need another layer.", true)
 		AURA_ORB_BUILD_ID:
 			_show_ari_thought("The light went out. Now they can reach me cleaner.", true)
+		BOW_TOWER_BUILD_ID:
+			_show_ari_thought("The tower fell. Distance is gone unless I move.", true)
 		FEAR_LANTERN_BUILD_ID:
 			_show_ari_thought("The warm light broke. The dark feels closer.", true)
 		REPAIR_BENCH_BUILD_ID:
@@ -2685,6 +2873,7 @@ func _draw() -> void:
 	draw_rect(arena, Color(0.12, 0.16, 0.12, 1.0), true)
 	_draw_defense_lanes(arena)
 	_draw_ari_intent()
+	_draw_ari_ranged_attack()
 	draw_rect(arena, Color(0.44, 0.50, 0.42, 1.0), false, 3.0)
 
 
@@ -2716,6 +2905,17 @@ func _draw_ari_intent() -> void:
 	var color := _intent_color(_ari_intent_label)
 	_draw_dashed_path(start, target, color)
 	_draw_intent_marker(target)
+
+
+func _draw_ari_ranged_attack() -> void:
+	if _ari_ranged_flash_time <= 0.0:
+		return
+	var alpha := clampf(_ari_ranged_flash_time / 0.35, 0.0, 1.0)
+	var start := to_local(_ari_ranged_flash_from)
+	var target := to_local(_ari_ranged_flash_to)
+	draw_line(start, target, Color(1.0, 0.88, 0.34, 0.92 * alpha), 4.0)
+	draw_line(start, target, Color(0.38, 0.18, 0.04, 0.70 * alpha), 1.4)
+	draw_circle(target, 8.0 + alpha * 5.0, Color(1.0, 0.80, 0.28, 0.22 * alpha))
 
 
 func _draw_dashed_path(start: Vector2, target: Vector2, color: Color) -> void:
@@ -2777,6 +2977,11 @@ func _draw_intent_symbol(center: Vector2, color: Color) -> void:
 		"Train":
 			draw_line(center + Vector2(-8.0, 8.0), center + Vector2(8.0, -8.0), bright, 2.3)
 			draw_line(center + Vector2(-6.0, -4.0), center + Vector2(4.0, 6.0), color, 2.3)
+		"Tower":
+			draw_rect(Rect2(center + Vector2(-7.0, -8.0), Vector2(14.0, 14.0)), color.darkened(0.12), true)
+			draw_line(center + Vector2(-6.0, 7.0), center + Vector2(0.0, -8.0), bright, 1.8)
+			draw_line(center + Vector2(6.0, 7.0), center + Vector2(0.0, -8.0), bright, 1.8)
+			draw_line(center + Vector2(-8.0, -2.0), center + Vector2(8.0, -2.0), bright, 1.8)
 		"Wait":
 			draw_arc(center, 7.0, -PI * 0.50, PI * 1.25, 18, bright, 2.0)
 			draw_line(center, center + Vector2(0.0, -7.0), bright, 1.4)
@@ -2807,6 +3012,6 @@ func _intent_color(label: String) -> Color:
 			return Color(0.92, 0.56, 0.34, 0.78)
 		"Orb", "Lamp", "Storm":
 			return Color(0.38, 0.82, 1.0, 0.76)
-		"Trap", "Mud", "Decoy", "Thorn":
+		"Trap", "Mud", "Decoy", "Thorn", "Tower":
 			return Color(0.95, 0.62, 0.30, 0.76)
 	return Color(0.82, 0.88, 0.64, 0.76)

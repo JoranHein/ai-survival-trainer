@@ -49,6 +49,9 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var lesson_bias := _lesson_bias(context)
 	var personality := _personality(context)
 	var run_build := _run_build(context)
+	var enemy_type_counts := _enemy_type_counts(context)
+	var runner_pressure := clampf(float(int(enemy_type_counts.get("runner", 0))) / 2.0, 0.0, 1.0)
+	var brute_pressure := clampf(float(int(enemy_type_counts.get("brute", 0))), 0.0, 1.0)
 	var fearfulness := _trait(personality, "fearfulness")
 	var aggression := _trait(personality, "aggression")
 	var curiosity := _trait(personality, "curiosity")
@@ -71,7 +74,11 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	)
 	var sign_food_preference := _hint(priority_hints, "farm_food")
 	var sign_trap_preference := _hint(priority_hints, "build_trap")
-	var sign_tower_preference := _hint(priority_hints, "build_tower")
+	var sign_tower_preference := maxf(_hint(priority_hints, "build_tower"), _hint(priority_hints, "use_tower"))
+	var sign_ranged_preference := maxf(
+		maxf(_hint(priority_hints, "range"), _hint(priority_hints, "train_bow")),
+		_hint(priority_hints, "ranged_attack")
+	)
 	var sign_tar_pit_preference := _hint(priority_hints, "build_tar_pit")
 	var sign_lantern_preference := _hint(priority_hints, "build_fear_lantern")
 	var sign_decoy_preference := _hint(priority_hints, "build_decoy_idol")
@@ -93,7 +100,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var combat_preference := sign_combat_preference
 	var food_preference := sign_food_preference
 	var trap_preference := sign_trap_preference
-	var range_preference := maxf(_hint(priority_hints, "range"), kite_preference)
+	var range_preference := maxf(sign_ranged_preference, kite_preference)
 	var tower_preference := maxf(sign_tower_preference, range_preference)
 	var tar_pit_preference := sign_tar_pit_preference
 	var lantern_preference := sign_lantern_preference
@@ -105,6 +112,17 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var rest_preference := sign_rest_preference
 	var reflect_preference := sign_reflect_preference
 	var defensive_wait_preference := maxf(_hint(priority_hints, "defensive_wait"), maxf(cover_preference, _hint(priority_hints, "wait_or_idle")))
+	if runner_pressure > 0.0:
+		cover_preference = maxf(cover_preference, 0.34 + runner_pressure * 0.12)
+		aura_lure_preference = maxf(aura_lure_preference, 0.34 + runner_pressure * 0.14)
+		range_preference = clampf(range_preference + 0.18 + runner_pressure * 0.18, 0.0, 1.0)
+		tower_preference = maxf(tower_preference, range_preference)
+		defensive_wait_preference = maxf(defensive_wait_preference, 0.28 + runner_pressure * 0.10)
+	if brute_pressure > 0.0:
+		aura_lure_preference = maxf(aura_lure_preference, 0.42 + brute_pressure * 0.12)
+		range_preference = clampf(range_preference + 0.18 + brute_pressure * 0.22, 0.0, 1.0)
+		tower_preference = maxf(tower_preference, range_preference)
+		wall_preference = clampf(wall_preference - brute_pressure * 0.18, 0.0, 1.0)
 	wall_preference = clampf(wall_preference + (fearfulness * 0.22 if wall_preference > 0.0 or fearfulness >= 0.66 else 0.0), 0.0, 1.0)
 	aura_preference = clampf(aura_preference + (fearfulness * 0.12 + curiosity * 0.10 if aura_preference > 0.0 else 0.0), 0.0, 1.0)
 	mining_preference = clampf(mining_preference + (curiosity * 0.10 if mining_preference > 0.0 else 0.0), 0.0, 1.0)
@@ -182,11 +200,18 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	if sign_repair_preference > 0.25 and damaged_structure_count <= 0 and has_defenses:
 		return _job("wait_or_idle", "Sign wants repair, but nothing is broken yet")
 
+	var tower_use_preference := maxf(sign_tower_preference, range_preference)
+	if tower_use_preference > 0.30 and bow_tower_count > 0 and tower_use_preference >= aura_lure_preference and tower_use_preference >= cover_preference:
+		return _job("use_tower", "Sign says use tower range")
+
 	if aura_lure_preference > 0.30 and aura_orb_count > 0 and aura_lure_preference >= cover_preference:
 		return _job("lure_to_aura", "Sign says the light should hurt them")
 
 	if cover_preference > 0.30 and wall_count > 0:
 		return _job("use_cover", "Sign says use the existing wall as cover")
+
+	if tower_use_preference > 0.30 and bow_tower_count > 0:
+		return _job("use_tower", "Sign says use tower range")
 
 	if aura_lure_preference > 0.30 and aura_orb_count > 0:
 		return _job("lure_to_aura", "Sign says the light should hurt them")
@@ -285,31 +310,54 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 		return _job("wait_or_idle", "Night has started")
 
 	var priority_hints := _priority_hints(context)
+	var enemy_type_counts := _enemy_type_counts(context)
+	var runner_pressure := clampf(float(int(enemy_type_counts.get("runner", 0))) / 2.0, 0.0, 1.0)
+	var brute_pressure := clampf(float(int(enemy_type_counts.get("brute", 0))), 0.0, 1.0)
 	var cover_preference := maxf(
 		maxf(_hint(priority_hints, "use_existing_wall"), _hint(priority_hints, "wait_behind_wall")),
 		maxf(_hint(priority_hints, "use_cover"), _hint(priority_hints, "hide"))
 	)
 	var aura_lure_preference := _hint(priority_hints, "lure_to_aura")
+	var tower_preference := maxf(
+		maxf(_hint(priority_hints, "build_tower"), _hint(priority_hints, "use_tower")),
+		maxf(maxf(_hint(priority_hints, "range"), _hint(priority_hints, "train_bow")), _hint(priority_hints, "ranged_attack"))
+	)
 	var flee_preference := maxf(_hint(priority_hints, "flee"), _hint(priority_hints, "kite"))
 	var has_valid_cover := bool(context.get("has_valid_cover", int(context.get("wall_count", 0)) > 0))
 	var has_valid_aura := bool(context.get("has_valid_aura", int(context.get("aura_orb_count", 0)) > 0))
+	var has_valid_tower := bool(context.get("has_valid_tower", int(context.get("bow_tower_count", 0)) > 0))
 	var nearest_enemy_distance := float(context.get("nearest_enemy_distance", INF))
 	var ari_hp_ratio := clampf(float(context.get("ari_hp_ratio", 1.0)), 0.0, 1.0)
+	if runner_pressure > 0.0:
+		cover_preference = maxf(cover_preference, 0.34 + runner_pressure * 0.12)
+		aura_lure_preference = maxf(aura_lure_preference, 0.34 + runner_pressure * 0.14)
+		tower_preference = maxf(tower_preference, 0.32 + runner_pressure * 0.16)
+		flee_preference = maxf(flee_preference, 0.20 + runner_pressure * 0.08)
+	if brute_pressure > 0.0:
+		aura_lure_preference = maxf(aura_lure_preference, 0.42 + brute_pressure * 0.12)
+		tower_preference = maxf(tower_preference, 0.44 + brute_pressure * 0.14)
 	var wants_cover := cover_preference > 0.25
 	var wants_aura_lure := aura_lure_preference > 0.25
+	var wants_tower := tower_preference > 0.25
 
 	if ari_hp_ratio <= night_low_hp_ratio:
 		return _job("flee", "HP is low; move away from danger")
 	if nearest_enemy_distance <= night_flee_enemy_distance:
 		return _job("flee", "Enemies are too close; move")
+	if wants_tower and not has_valid_tower:
+		return _job("flee", "The tower is gone; find another answer")
 	if wants_cover and not has_valid_cover:
 		return _job("flee", "The wall is gone; find another answer")
 	if wants_aura_lure and not has_valid_aura:
 		return _job("flee", "The light is gone; find another answer")
+	if wants_tower and has_valid_tower and tower_preference >= aura_lure_preference and tower_preference >= cover_preference:
+		return _job("use_tower", "Use height and range while enemies approach")
 	if wants_aura_lure and has_valid_aura and aura_lure_preference >= cover_preference:
 		return _job("lure_to_aura", "Keep the dead crossing the light")
 	if wants_cover and has_valid_cover:
 		return _job("use_cover", "Keep the wall between Ari and teeth")
+	if wants_tower and has_valid_tower:
+		return _job("use_tower", "Use height and range while enemies approach")
 	if wants_aura_lure and has_valid_aura:
 		return _job("lure_to_aura", "Keep the dead crossing the light")
 	if flee_preference > 0.25:
@@ -352,6 +400,10 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 			if lower_reason.find("height") >= 0 or lower_reason.find("arrows") >= 0:
 				return "If I stand high enough, maybe death has to climb."
 			return "Distance can be a kind of wall."
+		"use_tower":
+			if lower_reason.find("range") >= 0 or lower_reason.find("height") >= 0:
+				return "Up here, their hands cannot reach me."
+			return "Arrows keep teeth far away."
 		"build_tar_pit":
 			if lower_reason.find("slow") >= 0:
 				return "If the ground grabs them, I get more time."
@@ -461,6 +513,13 @@ func _run_build(context: Dictionary) -> Dictionary:
 	var run_build = context.get("run_build", {})
 	if typeof(run_build) == TYPE_DICTIONARY:
 		return run_build
+	return {}
+
+
+func _enemy_type_counts(context: Dictionary) -> Dictionary:
+	var counts = context.get("enemy_type_counts", {})
+	if typeof(counts) == TYPE_DICTIONARY:
+		return counts
 	return {}
 
 

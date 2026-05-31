@@ -74,7 +74,17 @@ func _process(delta: float) -> void:
 
 func _update_follow_position() -> void:
 	if is_instance_valid(_target):
-		global_position = _target.global_position + follow_offset
+		var desired := _target.global_position + follow_offset
+		var viewport_size := get_viewport_rect().size
+		if viewport_size.x > 0.0 and viewport_size.y > 0.0:
+			var reserved_right_ui := 595.0
+			var min_x := 170.0
+			var max_x := maxf(min_x, viewport_size.x - reserved_right_ui)
+			var min_y := minf(viewport_size.y - 150.0, 430.0)
+			var max_y := maxf(min_y, viewport_size.y - 112.0)
+			desired.x = clampf(desired.x, min_x, max_x)
+			desired.y = clampf(desired.y, min_y, max_y)
+		global_position = desired
 		queue_redraw()
 
 

@@ -16,8 +16,12 @@ func _draw() -> void:
 	if flash > 0.0:
 		fill_color = fill_color.lerp(Color(1.0, 0.78, 0.52, 1.0), flash * 0.65)
 		edge_color = edge_color.lerp(Color(1.0, 0.92, 0.68, 1.0), flash)
+	var shadow_rect := rect.grow(4.0)
+	shadow_rect.position += Vector2(3.0, 5.0)
+	draw_rect(shadow_rect, Color(0.0, 0.0, 0.0, 0.30), true)
+	draw_rect(rect.grow(2.0), Color(0.08, 0.08, 0.07, 0.95), true)
 	draw_rect(rect, fill_color, true)
-	draw_rect(rect, edge_color, false, 2.0)
+	draw_rect(rect, edge_color, false, 3.0)
 	_draw_cracks(hp_ratio)
 	draw_rect(Rect2(rect.position + Vector2(3.0, 3.0), Vector2(size.x - 6.0, 4.0)), Color(0.10, 0.11, 0.10, 0.95), true)
 	draw_rect(Rect2(rect.position + Vector2(3.0, 3.0), Vector2((size.x - 6.0) * hp_ratio, 4.0)), _hp_bar_color(hp_ratio), true)
