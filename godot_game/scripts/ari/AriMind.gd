@@ -4,6 +4,8 @@ extends Node
 @export var target_wall_count := 2
 @export var target_aura_orb_count := 1
 @export var night_close_seconds := 8.0
+@export var night_flee_enemy_distance := 44.0
+@export var night_low_hp_ratio := 0.35
 
 
 func choose_daytime_job(context: Dictionary) -> Dictionary:
@@ -63,7 +65,10 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var sign_wall_preference := _hint(priority_hints, "wall")
 	var sign_aura_preference := _hint(priority_hints, "aura_orb")
 	var sign_mining_preference := _hint(priority_hints, "mining")
-	var sign_combat_preference := _hint(priority_hints, "combat_training")
+	var sign_combat_preference := maxf(
+		maxf(_hint(priority_hints, "combat_training"), _hint(priority_hints, "train_combat")),
+		maxf(_hint(priority_hints, "fight"), _hint(priority_hints, "prepare_weapon"))
+	)
 	var sign_food_preference := _hint(priority_hints, "farm_food")
 	var sign_trap_preference := _hint(priority_hints, "build_trap")
 	var sign_tower_preference := _hint(priority_hints, "build_tower")
@@ -273,6 +278,45 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	return _job("wait_or_idle", "Basic defenses ready")
 
 
+func choose_night_tactic(context: Dictionary) -> Dictionary:
+	if not bool(context.get("is_night", false)):
+		return _job("wait_or_idle", "Night tactic inactive")
+	if int(context.get("enemy_count", 0)) <= 0:
+		return _job("wait_or_idle", "Night has started")
+
+	var priority_hints := _priority_hints(context)
+	var cover_preference := maxf(
+		maxf(_hint(priority_hints, "use_existing_wall"), _hint(priority_hints, "wait_behind_wall")),
+		maxf(_hint(priority_hints, "use_cover"), _hint(priority_hints, "hide"))
+	)
+	var aura_lure_preference := _hint(priority_hints, "lure_to_aura")
+	var flee_preference := maxf(_hint(priority_hints, "flee"), _hint(priority_hints, "kite"))
+	var has_valid_cover := bool(context.get("has_valid_cover", int(context.get("wall_count", 0)) > 0))
+	var has_valid_aura := bool(context.get("has_valid_aura", int(context.get("aura_orb_count", 0)) > 0))
+	var nearest_enemy_distance := float(context.get("nearest_enemy_distance", INF))
+	var ari_hp_ratio := clampf(float(context.get("ari_hp_ratio", 1.0)), 0.0, 1.0)
+	var wants_cover := cover_preference > 0.25
+	var wants_aura_lure := aura_lure_preference > 0.25
+
+	if ari_hp_ratio <= night_low_hp_ratio:
+		return _job("flee", "HP is low; move away from danger")
+	if nearest_enemy_distance <= night_flee_enemy_distance:
+		return _job("flee", "Enemies are too close; move")
+	if wants_cover and not has_valid_cover:
+		return _job("flee", "The wall is gone; find another answer")
+	if wants_aura_lure and not has_valid_aura:
+		return _job("flee", "The light is gone; find another answer")
+	if wants_aura_lure and has_valid_aura and aura_lure_preference >= cover_preference:
+		return _job("lure_to_aura", "Keep the dead crossing the light")
+	if wants_cover and has_valid_cover:
+		return _job("use_cover", "Keep the wall between Ari and teeth")
+	if wants_aura_lure and has_valid_aura:
+		return _job("lure_to_aura", "Keep the dead crossing the light")
+	if flee_preference > 0.25:
+		return _job("flee", "Sign asks for distance")
+	return _job("wait_or_idle", "No night tactic")
+
+
 func thought_for_job(job: String, reason: String, personality := {}, run_build := {}) -> String:
 	var lower_reason := reason.to_lower()
 	match job:
@@ -336,6 +380,16 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 			return "The wall is already there. I should put it between me and their teeth."
 		"lure_to_aura":
 			return "If they cross the light, I do not have to touch them."
+		"flee":
+			if lower_reason.find("wall") >= 0:
+				return "The wall is gone. I need another answer."
+			if lower_reason.find("light") >= 0:
+				return "The light is gone. I need to move before they reach me."
+			if lower_reason.find("close") >= 0:
+				return "They are too close. I have to move."
+			if lower_reason.find("hp") >= 0 or lower_reason.find("low") >= 0:
+				return "I am too hurt to trust this spot."
+			return "This place is not safe. I have to move."
 		"build_storm_rod":
 			if lower_reason.find("wings") >= 0 or lower_reason.find("sky") >= 0:
 				return "The wall did not reach the sky. The storm might."

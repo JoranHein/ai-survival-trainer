@@ -11,6 +11,7 @@ const LifeArchiveScript = preload("res://scripts/ari/LifeArchive.gd")
 const PermanentInsightBookScript = preload("res://scripts/ari/PermanentInsightBook.gd")
 const WisdomSynthesizerScript = preload("res://scripts/ari/WisdomSynthesizer.gd")
 const AriMindScript = preload("res://scripts/ari/AriMind.gd")
+const SignMindScript = preload("res://scripts/ari/SignMind.gd")
 
 var failures: Array[String] = []
 
@@ -26,6 +27,7 @@ func _run() -> void:
 
 	await _test_bridge_health_and_raw_validation(bridge)
 	_test_deep_interpretation_contract(bridge)
+	_test_local_combat_signs()
 	_test_ai_tactical_priority_jobs()
 	_test_memory_records_events()
 	_test_chronicle_validates_scribe_notes()
@@ -161,7 +163,103 @@ func _test_ai_tactical_priority_jobs() -> void:
 	}))
 	_assert(repair_decision.get("job", "") == "wait_or_idle", "repair hint without damaged structures should not invent a new repair system")
 	_assert(str(repair_decision.get("reason", "")).to_lower().contains("repair"), "unavailable repair should still be reported as Ari's reason")
+
+	for training_case in [
+		{"key": "train_combat", "label": "train_combat"},
+		{"key": "fight", "label": "fight"},
+		{"key": "prepare_weapon", "label": "prepare_weapon"},
+	]:
+		var training_decision := ari_mind.choose_daytime_job(_base_mind_context({
+			"wall_count": 2,
+			"aura_orb_count": 1,
+			"priority_hints": {
+				str(training_case.get("key", "")): 0.9,
+			},
+		}))
+		_assert(training_decision.get("job", "") == "train_combat", "%s hint should make Ari train after basic defenses exist" % str(training_case.get("label", "")))
+		_assert(str(training_decision.get("reason", "")).to_lower().contains("prepare") or str(training_decision.get("reason", "")).to_lower().contains("combat"), "%s training reason should explain combat preparation" % str(training_case.get("label", "")))
+
+	_assert(ari_mind.has_method("choose_night_tactic"), "AriMind should choose tactical night behavior")
+	if not ari_mind.has_method("choose_night_tactic"):
+		ari_mind.free()
+		return
+
+	var night_cover_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 2,
+		"nearest_enemy_distance": 118.0,
+		"ari_hp_ratio": 0.82,
+		"wall_count": 1,
+		"has_valid_cover": true,
+		"priority_hints": {
+			"use_existing_wall": 0.8,
+			"wait_behind_wall": 0.9,
+			"use_cover": 0.9,
+		},
+	}))
+	_assert(night_cover_decision.get("job", "") == "use_cover", "night cover hints should keep Ari using wall cover")
+
+	var night_aura_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 2,
+		"nearest_enemy_distance": 112.0,
+		"ari_hp_ratio": 0.9,
+		"wall_count": 1,
+		"aura_orb_count": 1,
+		"has_valid_aura": true,
+		"priority_hints": {
+			"lure_to_aura": 0.95,
+		},
+	}))
+	_assert(night_aura_decision.get("job", "") == "lure_to_aura", "night aura hint should keep Ari luring through an existing orb")
+
+	var close_enemy_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 1,
+		"nearest_enemy_distance": 28.0,
+		"ari_hp_ratio": 0.7,
+		"wall_count": 1,
+		"has_valid_cover": true,
+		"priority_hints": {
+			"use_cover": 0.9,
+		},
+	}))
+	_assert(close_enemy_decision.get("job", "") == "flee", "Ari should flee when enemies are too close for the tactic")
+	_assert(str(close_enemy_decision.get("reason", "")).to_lower().contains("close"), "flee reason should explain close danger")
+
+	var broken_cover_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 1,
+		"nearest_enemy_distance": 90.0,
+		"ari_hp_ratio": 0.8,
+		"wall_count": 0,
+		"has_valid_cover": false,
+		"priority_hints": {
+			"use_cover": 0.9,
+		},
+	}))
+	_assert(broken_cover_decision.get("job", "") == "flee", "Ari should reposition when sign cover fails at night")
+	_assert(str(broken_cover_decision.get("reason", "")).to_lower().contains("wall"), "failed cover reason should mention the wall")
 	ari_mind.free()
+
+
+func _test_local_combat_signs() -> void:
+	var sign_mind: SignMind = SignMindScript.new()
+	for sign_text in [
+		"train before night",
+		"make your hands hurt them",
+		"teeth are coming",
+		"fight the dead",
+		"be ready to hit",
+	]:
+		var interpretation := sign_mind.interpret_sign(sign_text)
+		var hints: Dictionary = interpretation.get("priority_hints", {})
+		_assert(float(hints.get("combat_training", 0.0)) > 0.0, "local SignMind should read '%s' as combat training" % sign_text)
+	sign_mind.free()
 
 
 func _base_mind_context(overrides: Dictionary) -> Dictionary:

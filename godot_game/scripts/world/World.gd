@@ -271,27 +271,25 @@ func stage_visual_review_moment(moment: String) -> void:
 		"morning_idle":
 			_stage_morning_intent_path()
 		"midday_alive":
-			select_run_build_preset(3, false)
-			commit_sign("stand behind the wall")
+			select_run_build_preset(6, false)
+			commit_sign("train combat before night")
 			var arena := get_arena_rect()
 			resource_system.call("add_stone", 84)
 			resource_system.call("add_food", 2)
 			_place_visual_review_defense_layout(arena)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 26.0)
-			sign_interpretation = "Ari thinks the sign means to use the existing wall as cover."
+			sign_interpretation = "Ari reads danger and practice. The dummy may help."
 			sign_priority_hints = _normalize_ai_priority_hints({
-				"use_existing_wall": 0.9,
-				"wait_behind_wall": 0.85,
-				"use_cover": 0.9,
-				"build_wall": 0.1,
+				"train_combat": 0.9,
+				"fight": 0.65,
 			})
 			sign_strength = 0.78
 			sign_resonance = 0.76
-			ai_survival_theory = "use_cover"
+			ai_survival_theory = "train_combat"
 			ai_status = "AI staged"
 			_stage_ari_needs(68.0, 82.0, 22.0)
 			day_night.advance(21.0)
-			_advance_debug_daytime(4.0)
+			_advance_debug_daytime(7.0)
 			_set_status_message("Ari read the sign.", 1.8)
 			_show_current_job_thought(true)
 			selected_build_type = SPIKE_TRAP_BUILD_ID
@@ -305,6 +303,16 @@ func stage_visual_review_moment(moment: String) -> void:
 			resource_system.call("add_stone", 84)
 			_place_visual_review_defense_layout(arena)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 26.0)
+			commit_sign("the circle should eat the dead")
+			sign_interpretation = "Ari thinks the sign means to pull enemies through the Aura Orb."
+			sign_priority_hints = _normalize_ai_priority_hints({
+				"lure_to_aura": 0.95,
+				"place_aura_orb": 0.2,
+			})
+			sign_strength = 0.80
+			sign_resonance = 0.78
+			ai_survival_theory = "lure_to_aura"
+			ai_status = "AI staged"
 			selected_build_type = AURA_ORB_BUILD_ID
 			build_grid.call("set_selected_build_type", selected_build_type)
 			_set_status_message("Aura Orb radius active.", 2.0)
@@ -312,6 +320,7 @@ func stage_visual_review_moment(moment: String) -> void:
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.58, arena.size.y * 0.84), "runner")
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.18, arena.size.y * 0.78), "brute")
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.75, arena.size.y * 0.18), "flying")
+			_advance_ari_night_tactic(1.0)
 			_show_current_job_thought(true)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 999.0)
 		"ari_dead_or_damaged":
@@ -1120,8 +1129,7 @@ func _advance_ari_daytime(delta: float) -> void:
 		_clear_ari_intent()
 		return
 	if day_night.is_night():
-		_clear_ari_intent()
-		ari.call("stop_daytime_job", "Night has started")
+		_advance_ari_night_tactic(delta)
 		return
 
 	if _is_mining_enabled():
@@ -1188,6 +1196,28 @@ func _advance_ari_daytime(delta: float) -> void:
 			ari.call("wait_near", delta, wait_position, reason)
 
 
+func _advance_ari_night_tactic(delta: float) -> void:
+	if enemies.is_empty():
+		_clear_ari_intent()
+		ari.call("stop_daytime_job", "Night has started")
+		return
+
+	var decision: Dictionary = ari_mind.call("choose_night_tactic", _get_night_tactic_context())
+	var job := str(decision.get("job", "wait_or_idle"))
+	var reason := str(decision.get("reason", "Night has started"))
+	match job:
+		"use_cover":
+			_advance_ari_cover_job(delta, reason)
+		"lure_to_aura":
+			_advance_ari_aura_lure_job(delta, reason)
+		"flee":
+			_advance_ari_flee_job(delta, reason)
+		_:
+			var wait_position := _get_defense_wait_position()
+			_set_ari_intent(wait_position, "Wait")
+			ari.call("wait_near", delta, wait_position, reason)
+
+
 func _advance_ari_build_job(delta: float, build_type: String, reason: String) -> void:
 	var slot := _get_next_build_slot(build_type)
 	if not slot.has("cell"):
@@ -1226,11 +1256,12 @@ func _advance_ari_repair_job(delta: float, reason: String) -> void:
 func _advance_ari_cover_job(delta: float, reason: String) -> void:
 	var cover := _find_cover_position()
 	if not bool(cover.get("valid", false)):
-		var wait_position := _get_defense_wait_position()
-		_set_ari_intent(wait_position, "Cover")
-		ari.call("wait_near", delta, wait_position, "No wall cover available")
+		_advance_ari_flee_job(delta, "The wall is gone; find another answer")
 		return
 	var target_position: Vector2 = cover["position"]
+	if day_night.is_night() and _is_position_too_dangerous(target_position):
+		_advance_ari_flee_job(delta, "Enemies are too close; move")
+		return
 	_set_ari_intent(target_position, "Cover")
 	ari.call("advance_move_job", delta, "use_cover", reason, target_position, "using wall cover")
 
@@ -1238,13 +1269,20 @@ func _advance_ari_cover_job(delta: float, reason: String) -> void:
 func _advance_ari_aura_lure_job(delta: float, reason: String) -> void:
 	var lure := _find_aura_lure_position()
 	if not bool(lure.get("valid", false)):
-		var wait_position := _get_defense_wait_position()
-		_set_ari_intent(wait_position, "Lure")
-		ari.call("wait_near", delta, wait_position, "No aura lure available")
+		_advance_ari_flee_job(delta, "The light is gone; find another answer")
 		return
 	var target_position: Vector2 = lure["position"]
+	if day_night.is_night() and _is_position_too_dangerous(target_position):
+		_advance_ari_flee_job(delta, "Enemies are too close; move")
+		return
 	_set_ari_intent(target_position, "Lure")
 	ari.call("advance_move_job", delta, "lure_to_aura", reason, target_position, "luring through aura")
+
+
+func _advance_ari_flee_job(delta: float, reason: String) -> void:
+	var target_position := _find_flee_position()
+	_set_ari_intent(target_position, "Flee")
+	ari.call("advance_move_job", delta, "flee", reason, target_position, "fleeing")
 
 
 func _get_ari_mind_context() -> Dictionary:
@@ -1288,6 +1326,18 @@ func _get_ari_mind_context() -> Dictionary:
 	}
 
 
+func _get_night_tactic_context() -> Dictionary:
+	var context := _get_ari_mind_context()
+	var cover := _find_cover_position()
+	var lure := _find_aura_lure_position()
+	context["enemy_count"] = enemies.size()
+	context["nearest_enemy_distance"] = _nearest_enemy_distance_from(ari.global_position if ari != null else _get_defense_anchor())
+	context["ari_hp_ratio"] = _get_ari_hp_ratio()
+	context["has_valid_cover"] = bool(cover.get("valid", false))
+	context["has_valid_aura"] = bool(lure.get("valid", false))
+	return context
+
+
 func _get_run_build_context() -> Dictionary:
 	if run_build != null and run_build.has_method("get_context"):
 		var context = run_build.call("get_context")
@@ -1325,6 +1375,12 @@ func _get_ari_combat_stats() -> Dictionary:
 		"damage_bonus": 0.0,
 		"defense_training": 0.0,
 	}
+
+
+func _get_ari_hp_ratio() -> float:
+	if ari == null:
+		return 0.0
+	return clampf(float(ari.get("hp")) / maxf(float(ari.get("max_hp")), 1.0), 0.0, 1.0)
 
 
 func _get_ari_needs() -> Dictionary:
@@ -1538,7 +1594,10 @@ func _find_cover_position() -> Dictionary:
 	var anchor := _get_defense_anchor()
 	var wall_position: Vector2 = wall.global_position
 	var direction := anchor - wall_position
-	if direction.length() < 0.1 and ari != null:
+	var enemy := get_nearest_enemy(wall_position)
+	if enemy != null:
+		direction = wall_position - enemy.global_position
+	elif direction.length() < 0.1 and ari != null:
 		direction = ari.global_position - wall_position
 	if direction.length() < 0.1:
 		direction = Vector2.LEFT
@@ -1556,7 +1615,10 @@ func _find_aura_lure_position() -> Dictionary:
 	var anchor := _get_defense_anchor()
 	var aura_position: Vector2 = aura.global_position
 	var direction := anchor - aura_position
-	if direction.length() < 0.1 and ari != null:
+	var enemy := get_nearest_enemy(aura_position)
+	if enemy != null:
+		direction = aura_position - enemy.global_position
+	elif direction.length() < 0.1 and ari != null:
 		direction = ari.global_position - aura_position
 	if direction.length() < 0.1:
 		direction = Vector2.LEFT
@@ -1569,6 +1631,33 @@ func _find_aura_lure_position() -> Dictionary:
 		"position": _clamp_point_to_arena(aura_position + direction.normalized() * minf(radius * 0.55, 58.0)),
 		"structure": aura,
 	}
+
+
+func _find_flee_position() -> Vector2:
+	var origin := ari.global_position if ari != null else _get_defense_anchor()
+	var nearest_enemy := get_nearest_enemy(origin)
+	var base_direction := _get_defense_anchor() - origin
+	if nearest_enemy != null:
+		base_direction = origin - nearest_enemy.global_position
+	if base_direction.length() < 0.1:
+		base_direction = Vector2.LEFT
+	base_direction = base_direction.normalized()
+
+	var directions := [
+		base_direction,
+		base_direction.rotated(0.62),
+		base_direction.rotated(-0.62),
+		(_get_defense_anchor() - origin).normalized() if _get_defense_anchor().distance_to(origin) > 1.0 else Vector2.LEFT,
+	]
+	var best_position := _clamp_point_to_arena(origin + base_direction * 112.0)
+	var best_distance := _nearest_enemy_distance_from(best_position)
+	for direction in directions:
+		var candidate := _clamp_point_to_arena(origin + direction * 112.0)
+		var distance := _nearest_enemy_distance_from(candidate)
+		if distance > best_distance:
+			best_distance = distance
+			best_position = candidate
+	return best_position
 
 
 func _nearest_valid_structure(candidates: Array) -> Node2D:
@@ -1586,6 +1675,36 @@ func _nearest_valid_structure(candidates: Array) -> Node2D:
 			best_distance = distance
 			target = structure_node
 	return target
+
+
+func get_nearest_enemy(origin = null) -> Node2D:
+	var check_origin := ari.global_position if ari != null else _get_defense_anchor()
+	if typeof(origin) == TYPE_VECTOR2:
+		check_origin = origin
+	var target: Node2D = null
+	var best_distance := INF
+	for enemy in enemies:
+		if not is_instance_valid(enemy):
+			continue
+		var enemy_node := enemy as Node2D
+		if enemy_node == null:
+			continue
+		var distance := check_origin.distance_to(enemy_node.global_position)
+		if distance < best_distance:
+			best_distance = distance
+			target = enemy_node
+	return target
+
+
+func _nearest_enemy_distance_from(point: Vector2) -> float:
+	var nearest_enemy := get_nearest_enemy(point)
+	if nearest_enemy == null:
+		return INF
+	return point.distance_to(nearest_enemy.global_position)
+
+
+func _is_position_too_dangerous(point: Vector2, danger_distance := 42.0) -> bool:
+	return _nearest_enemy_distance_from(point) <= danger_distance
 
 
 func _clamp_point_to_arena(point: Vector2) -> Vector2:
@@ -2384,8 +2503,8 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 		float(normalized.get("lure_to_aura", 0.0))
 	))
 	_set_hint_max(normalized, "combat_training", maxf(
-		float(normalized.get("train_combat", 0.0)),
-		float(normalized.get("fight", 0.0))
+		maxf(float(normalized.get("train_combat", 0.0)), float(normalized.get("fight", 0.0))),
+		float(normalized.get("prepare_weapon", 0.0))
 	))
 	_set_hint_max(normalized, "defensive_wait", maxf(
 		maxf(float(normalized.get("wait_or_idle", 0.0)), float(normalized.get("use_existing_wall", 0.0))),

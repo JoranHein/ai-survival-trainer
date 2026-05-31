@@ -274,7 +274,7 @@ func advance_move_job(delta: float, job: String, reason: String, target_position
 
 	var to_target := target_position - global_position
 	if to_target.length() > build_arrive_distance:
-		current_action = "moving to %s" % job
+		current_action = _moving_action_for_job(job)
 		global_position += to_target.normalized() * minf(move_speed * delta, to_target.length())
 		queue_redraw()
 		return false
@@ -316,6 +316,8 @@ func get_action_cue() -> Dictionary:
 		return _make_action_cue("reflect", phase, Color(0.74, 0.66, 1.0, 1.0))
 	if action.find("repair") >= 0:
 		return _make_action_cue("repair", phase, Color(0.48, 0.88, 1.0, 1.0))
+	if action.find("flee") >= 0:
+		return _make_action_cue("flee", phase, Color(1.0, 0.46, 0.34, 1.0))
 	if action.find("cover") >= 0 or action.find("lure") >= 0 or action.find("aura") >= 0:
 		return _make_action_cue("wait", phase, Color(0.70, 0.88, 1.0, 1.0))
 	if (
@@ -444,6 +446,17 @@ func _make_action_cue(kind: String, phase: String, color: Color) -> Dictionary:
 		"phase": phase,
 		"color": color,
 	}
+
+
+func _moving_action_for_job(job: String) -> String:
+	match job:
+		"use_cover":
+			return "moving to wall cover"
+		"lure_to_aura":
+			return "moving to aura lure"
+		"flee":
+			return "fleeing"
+	return "moving to %s" % job
 
 
 func _draw() -> void:

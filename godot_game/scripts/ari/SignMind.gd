@@ -23,7 +23,7 @@ const HINT_ORDER := [
 ]
 
 const KEYWORDS := {
-	"combat_training": ["train", "training", "combat", "fight", "hurt", "attack", "weapon", "weapons", "sword", "bow", "arrow", "arrows", "kill", "teeth", "danger", "hands"],
+	"combat_training": ["train", "training", "combat", "fight", "hurt", "attack", "weapon", "weapons", "sword", "bow", "arrow", "arrows", "kill", "teeth", "danger", "hands", "prepare", "ready", "hit", "hits", "hitting"],
 	"range": ["bow", "arrow", "arrows", "distance", "far"],
 	"wall": ["wall", "walls", "stone", "fortress", "protect"],
 	"aura_orb": ["light", "circle", "orb", "ward"],
