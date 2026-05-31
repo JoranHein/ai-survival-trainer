@@ -28,7 +28,7 @@ const KEYWORDS := {
 	"wall": ["wall", "walls", "stone", "fortress", "protect"],
 	"aura_orb": ["light", "circle", "orb", "ward"],
 	"mining": ["mine", "mining", "rock", "rocks", "stone"],
-	"farm_food": ["farm", "food", "eat", "eating", "hungry", "hunger", "stomach", "crop", "crops", "harvest", "fruit"],
+	"farm_food": ["farm", "food", "eat", "eating", "hungry", "hunger", "stomach", "crop", "crops", "harvest", "fruit", "full"],
 	"build_trap": ["trap", "traps", "spike", "spikes", "floor", "ground", "punish", "snare"],
 	"build_tower": ["tower", "towers", "height", "high", "above", "below", "mountain", "perch", "rain"],
 	"build_tar_pit": ["slow", "slows", "mud", "tar", "sticky", "stuck", "sink", "mire"],
@@ -38,8 +38,8 @@ const KEYWORDS := {
 	"build_repair_bench": ["workbench", "bench", "tool", "tools", "fixer"],
 	"repair_structure": ["repair", "repairs", "fix", "fixing", "mend", "mending", "patch", "patched", "broken"],
 	"build_storm_rod": ["storm", "storms", "rod", "lightning", "thunder", "sky", "air", "flying", "wing", "wings"],
-	"rest": ["rest", "sleep", "bed", "quiet", "calm", "heart", "tired", "heal"],
-	"reflect_library": ["library", "read", "note", "notes", "remember", "lesson", "learn", "think", "mistake", "mistakes"],
+	"rest": ["rest", "sleep", "bed", "quiet", "calm", "heart", "tired", "heal", "safe", "safety", "breathe", "breath", "myself", "alone"],
+	"reflect_library": ["library", "book", "books", "read", "note", "notes", "remember", "lesson", "learn", "think", "mistake", "mistakes", "why"],
 	"defensive_wait": ["wait", "hide", "safe", "safety"],
 }
 

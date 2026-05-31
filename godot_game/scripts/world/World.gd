@@ -44,7 +44,7 @@ const STORM_ROD_BUILD_ID := "storm_rod"
 @onready var training_dummy: Node2D = $TrainingDummy
 @onready var farm_plot: Node2D = $FarmPlot
 @onready var bed_station: Node2D = $BedStation
-@onready var library_station: Node2D = $LibraryStation
+@onready var library_station: Node2D = $Library
 @onready var thought_bubble: Node2D = $ThoughtBubble
 @onready var darkness_overlay: ColorRect = $DarknessOverlay
 
@@ -90,6 +90,7 @@ var _fear_pressure_reported := false
 var _hunger_pressure_reported := false
 var _stamina_pressure_reported := false
 var _near_death_reported := false
+var _aura_damage_reported := false
 var _ai_sign_request_id := 0
 var _ari_ranged_cooldown := 0.0
 var _ari_ranged_flash_time := 0.0
@@ -201,7 +202,10 @@ func start_run() -> void:
 	farm_plot.call("reset_run")
 	bed_station.call("reset_run")
 	library_station.call("reset_run")
-	ari_memory.clear_day_memory()
+	if ari_memory.has_method("clear_life_memory"):
+		ari_memory.call("clear_life_memory")
+	else:
+		ari_memory.clear_day_memory()
 	lesson_book.clear_life()
 	latest_lesson_title = ""
 	_clear_ari_intent()
@@ -283,30 +287,32 @@ func stage_visual_review_moment(moment: String) -> void:
 		"morning_idle":
 			_stage_morning_intent_path()
 		"midday_alive":
-			select_run_build_preset(6, false)
-			commit_sign("train combat before night")
-			var arena := get_arena_rect()
-			resource_system.call("add_stone", 84)
+			select_run_build_preset(4, false)
+			commit_sign("think about what went wrong")
+			resource_system.call("add_stone", 24)
 			resource_system.call("add_food", 2)
-			_place_visual_review_defense_layout(arena)
-			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 26.0)
-			sign_interpretation = "Ari reads danger and practice. The dummy may help."
-			sign_priority_hints = _normalize_ai_priority_hints({
-				"train_combat": 0.9,
-				"fight": 0.65,
+			ari.global_position = library_station.global_position + Vector2(-82.0, 8.0)
+			ari_memory.record_event("structure_destroyed", {
+				"structure_type": WALL_BUILD_ID,
+				"day": day_night.day,
+				"phase": "midday",
 			})
-			sign_strength = 0.78
-			sign_resonance = 0.76
-			ai_survival_theory = "train_combat"
+			sign_interpretation = "Ari reads memory and wants the library's lesson."
+			sign_priority_hints = _normalize_ai_priority_hints({
+				"reflect_library": 0.9,
+			})
+			sign_strength = 0.82
+			sign_resonance = 0.80
+			ai_survival_theory = "library_reflection"
 			ai_status = "AI staged"
-			_stage_ari_needs(68.0, 82.0, 22.0)
+			_stage_ari_needs(28.0, 88.0, 24.0)
 			day_night.advance(21.0)
-			_advance_debug_daytime(7.0)
-			_set_status_message("Ari read the sign.", 1.8)
+			_advance_debug_daytime(4.0)
+			_set_status_message("Library reflection staged.", 1.8)
 			_show_current_job_thought(true)
-			selected_build_type = SPIKE_TRAP_BUILD_ID
+			selected_build_type = WALL_BUILD_ID
 			build_grid.call("set_selected_build_type", selected_build_type)
-			set_build_mode(true, false)
+			set_build_mode(false, false)
 		"dusk_darkening":
 			day_night.advance(57.5)
 		"night_zombies":
@@ -726,6 +732,18 @@ func get_contact_recoil_damage(enemy_position: Vector2, victim_position: Vector2
 	return recoil
 
 
+func record_aura_damage_success(enemy: Node, damage: float) -> void:
+	if _aura_damage_reported:
+		return
+	_aura_damage_reported = true
+	ari_memory.record_event("aura_damage_success", {
+		"enemy_type": str(enemy.get("enemy_type")) if enemy != null else "enemy",
+		"damage": maxf(float(damage), 0.0),
+		"day": day_night.day,
+		"phase": day_night.phase,
+	})
+
+
 func get_enemy_attraction_target(enemy_position: Vector2, enemy_type := "zombie") -> Node:
 	var closest_decoy: Node = null
 	var closest_distance := INF
@@ -854,6 +872,7 @@ func _emit_state() -> void:
 		"lowest_structure_hp_ratio": _get_lowest_structure_hp_ratio(),
 		"stone": _stone_count(),
 		"food": _food_count(),
+		"ari_hp_ratio": _get_ari_hp_ratio(),
 		"wall_cost": int(_get_wall_cost().get("stone", 0)),
 		"orb_cost": int(_get_aura_orb_cost().get("stone", 0)),
 		"trap_cost": int(_get_spike_trap_cost().get("stone", 0)),
@@ -870,7 +889,7 @@ func _emit_state() -> void:
 		"ari_action": str(ari.call("get_current_action")) if ari != null else "idle",
 		"combat_stats": _get_ari_combat_stats(),
 		"needs": _get_ari_needs(),
-		"lesson_count": lesson_book.get_all_notes().size(),
+		"lesson_count": _get_lesson_count(),
 		"latest_lesson_title": latest_lesson_title,
 		"latest_thought": latest_thought,
 		"death_recap": death_recap,
@@ -1031,6 +1050,11 @@ func _on_ari_damaged(hp: float) -> void:
 			"day": day_night.day,
 			"phase": day_night.phase,
 		})
+		ari_memory.record_event("ari_near_death", {
+			"hp": hp,
+			"day": day_night.day,
+			"phase": day_night.phase,
+		})
 		_show_ari_thought("That was too close. I need distance, cover, or something that hurts them first.", true)
 	else:
 		_show_ari_thought(thought)
@@ -1039,11 +1063,16 @@ func _on_ari_damaged(hp: float) -> void:
 func _on_ari_job_changed(job: String, reason: String) -> void:
 	var thought: String = str(ari_mind.call("thought_for_job", job, reason, personality_traits, _get_run_build_context()))
 	if job == "rest":
-		var latest_note := lesson_book.get_latest_note()
+		var latest_note := _get_latest_lifetime_note()
 		if not latest_note.is_empty():
 			var hypothesis := str(latest_note.get("hypothesis", "")).strip_edges()
 			if hypothesis != "":
 				thought = "I read the last note again. %s" % hypothesis
+			ari_memory.record_event("note_reread", {
+				"title": str(latest_note.get("title", "")),
+				"day": day_night.day,
+				"phase": day_night.phase,
+			})
 	_show_ari_thought(thought)
 
 
@@ -1153,12 +1182,19 @@ func _on_structure_destroyed(structure: Node) -> void:
 	thorn_totems.erase(structure)
 	repair_benches.erase(structure)
 	storm_rods.erase(structure)
+	var structure_type := str(structure.get("structure_type"))
 	ari_memory.record_event("structure_destroyed", {
-		"structure_type": str(structure.get("structure_type")),
+		"structure_type": structure_type,
 		"day": day_night.day,
 		"phase": day_night.phase,
 	})
-	_show_structure_destroyed_thought(str(structure.get("structure_type")))
+	if structure_type == WALL_BUILD_ID:
+		ari_memory.record_event("wall_destroyed", {
+			"structure_type": structure_type,
+			"day": day_night.day,
+			"phase": day_night.phase,
+		})
+	_show_structure_destroyed_thought(structure_type)
 	var cell_to_remove = null
 	for cell in structure_cells.keys():
 		if structure_cells[cell] == structure:
@@ -1167,6 +1203,18 @@ func _on_structure_destroyed(structure: Node) -> void:
 	if cell_to_remove != null:
 		structure_cells.erase(cell_to_remove)
 	_emit_state()
+
+
+func record_structure_damaged(structure: Node, damage: float) -> void:
+	if structure == null or not is_instance_valid(structure):
+		return
+	ari_memory.record_event("structure_damaged", {
+		"structure_type": str(structure.get("structure_type")),
+		"damage": maxf(float(damage), 0.0),
+		"hp_ratio": float(structure.call("get_hp_ratio")) if structure.has_method("get_hp_ratio") else 1.0,
+		"day": day_night.day,
+		"phase": day_night.phase,
+	})
 
 
 func _on_enemy_died(enemy: Node) -> void:
@@ -1224,7 +1272,7 @@ func _advance_ari_daytime(delta: float) -> void:
 			var produced := int(ari.call("advance_farming_job", delta, true, reason))
 			if produced > 0:
 				ari_memory.record_event("food_harvested", {"food": produced, "day": day_night.day})
-				_show_ari_thought("Food first. Fear is louder on an empty stomach.")
+				_show_ari_thought("If I am fed, the night feels smaller.")
 		"eat_food":
 			_set_ari_intent(ari.global_position, "Eat")
 			_advance_ari_eat_job(reason)
@@ -1405,6 +1453,11 @@ func _advance_ari_ranged_attack(_delta: float, tower: Node2D) -> void:
 		"day": day_night.day,
 		"phase": day_night.phase,
 	})
+	ari_memory.record_event("tower_ranged_success", {
+		"damage": damage,
+		"day": day_night.day,
+		"phase": day_night.phase,
+	})
 
 
 func _get_ari_mind_context() -> Dictionary:
@@ -1440,7 +1493,9 @@ func _get_ari_mind_context() -> Dictionary:
 		"combat_stats": _get_ari_combat_stats(),
 		"needs": _get_ari_needs(),
 		"food": _food_count(),
-		"lesson_count": lesson_book.get_all_notes().size(),
+		"ari_hp_ratio": _get_ari_hp_ratio(),
+		"lesson_count": _get_lesson_count(),
+		"meaningful_event_count": _get_meaningful_event_count(),
 		"lesson_priority_bias": _get_lesson_priority_bias(),
 		"priority_hints": sign_priority_hints,
 		"personality": personality_traits,
@@ -1480,6 +1535,10 @@ func _get_permanent_progression_state() -> Dictionary:
 
 
 func _get_lesson_priority_bias() -> Dictionary:
+	if ari_memory != null and ari_memory.has_method("get_note_priority_bias"):
+		var memory_bias = ari_memory.call("get_note_priority_bias")
+		if typeof(memory_bias) == TYPE_DICTIONARY and not memory_bias.is_empty():
+			return memory_bias.duplicate(true)
 	var latest_note := lesson_book.get_latest_note()
 	if latest_note.is_empty():
 		return {}
@@ -1487,6 +1546,28 @@ func _get_lesson_priority_bias() -> Dictionary:
 	if typeof(bias) == TYPE_DICTIONARY:
 		return bias.duplicate(true)
 	return {}
+
+
+func _get_lesson_count() -> int:
+	if ari_memory != null and ari_memory.has_method("get_lifetime_notes"):
+		var notes = ari_memory.call("get_lifetime_notes")
+		if typeof(notes) == TYPE_ARRAY:
+			return notes.size()
+	return lesson_book.get_all_notes().size()
+
+
+func _get_latest_lifetime_note() -> Dictionary:
+	if ari_memory != null and ari_memory.has_method("get_latest_lifetime_note"):
+		var note = ari_memory.call("get_latest_lifetime_note")
+		if typeof(note) == TYPE_DICTIONARY:
+			return note
+	return lesson_book.get_latest_note()
+
+
+func _get_meaningful_event_count() -> int:
+	if ari_memory != null and ari_memory.has_method("get_meaningful_event_count"):
+		return int(ari_memory.call("get_meaningful_event_count", 30))
+	return 0
 
 
 func _get_ari_combat_stats() -> Dictionary:
@@ -2441,52 +2522,23 @@ func _position_library_station() -> void:
 
 
 func _create_library_note() -> void:
-	var recent := ari_memory.get_recent_events(20)
-	var title := "Day %d - I need a clearer plan" % day_night.day
-	var hypothesis := "Preparation before night improves survival."
-	var markdown := "# %s\n\n" % title
-	var priority_bias := {"prepare": 0.1}
-
-	var damaged := _recent_event_count(recent, "ari_damaged")
-	var structures_lost := _recent_event_count(recent, "structure_destroyed")
-	var enemies_killed := _recent_event_count(recent, "enemy_killed")
-	var food_events := _recent_event_count(recent, "food_eaten") + _recent_event_count(recent, "food_harvested")
-	if structures_lost > 0:
-		title = "Day %d - The wall was not enough" % day_night.day
-		hypothesis = "Weak walls need damage or repair behind them."
-		markdown = "# %s\n\nA structure broke while I was trying to survive.\nMore wall is not always more safety.\nI need damage, repair, or better placement before contact.\n" % title
-		priority_bias = {"build_wall": 0.10, "place_aura_orb": 0.08, "build_repair_bench": 0.10}
-	elif damaged > 0:
-		title = "Day %d - Teeth reached me" % day_night.day
-		hypothesis = "If enemies touch me, I need distance, walls, or training."
-		markdown = "# %s\n\nI was hurt recently.\nThe plan did not keep teeth far enough away.\nTraining, walls, and light all matter before night.\n" % title
-		priority_bias = {"train_combat": 0.12, "build_wall": 0.10}
-	elif enemies_killed > 0:
-		title = "Day %d - Damage worked" % day_night.day
-		hypothesis = "Damage before contact can solve part of the night."
-		markdown = "# %s\n\nAn enemy died before the night ended.\nThe circle, training, or walls bought me time.\nI should improve the thing that hurt them first.\n" % title
-		priority_bias = {"place_aura_orb": 0.12, "train_combat": 0.08}
-	elif food_events > 0:
-		title = "Day %d - Food steadied me" % day_night.day
-		hypothesis = "Food keeps hunger from turning fear into danger."
-		markdown = "# %s\n\nFood helped me keep moving.\nAn empty stomach makes the night louder.\nI should not ignore the farm before dusk.\n" % title
-		priority_bias = {"farm_food": 0.14, "rest": 0.06}
-	else:
-		markdown += "Nothing dramatic happened yet.\nThat might mean the plan was quiet, or that I have not tested it.\nI should prepare, then watch what fails.\n"
-
-	var note := {
-		"title": title,
-		"markdown": markdown,
-		"hypothesis": hypothesis,
-		"priority_bias": priority_bias,
-		"confidence": 0.45,
-		"thought": "I wrote down what the day taught me.",
-		"created_day": day_night.day,
-	}
+	var note := {}
+	if ari_memory.has_method("create_lifetime_note_from_recent_events"):
+		note = ari_memory.call("create_lifetime_note_from_recent_events", day_night.day)
+	if note.is_empty():
+		_show_ari_thought("I need something real to think about first.", true)
+		_set_status_message("Library found no new lesson yet.", 2.0)
+		_emit_state()
+		return
+	var title := str(note.get("title", "Ari's rough local reflection"))
 	lesson_book.add_note(note)
 	latest_lesson_title = title
-	ari_memory.record_event("library_note_created", {"title": title, "day": day_night.day})
-	_show_ari_thought("I wrote down what the day taught me.", true)
+	ari_memory.record_event("library_note_created", {
+		"title": title,
+		"day": day_night.day,
+	})
+	var thought := str(note.get("thought", "I wrote it down. Maybe I will believe it when I sleep."))
+	_show_ari_thought(thought, true)
 	_set_status_message("Library note: %s" % title, 2.4)
 	_emit_state()
 
@@ -2688,6 +2740,10 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 		maxf(float(normalized.get("train_combat", 0.0)), float(normalized.get("fight", 0.0))),
 		maxf(float(normalized.get("prepare_weapon", 0.0)), float(normalized.get("train_bow", 0.0)))
 	))
+	_set_hint_max(normalized, "farm_food", maxf(
+		maxf(float(normalized.get("farm_food", 0.0)), float(normalized.get("eat", 0.0))),
+		float(normalized.get("eat_food", 0.0))
+	))
 	_set_hint_max(normalized, "build_tower", maxf(
 		float(normalized.get("build_tower", 0.0)),
 		float(normalized.get("use_tower", 0.0)) * 0.35
@@ -2780,6 +2836,7 @@ func _reset_survival_pressure_flags() -> void:
 	_hunger_pressure_reported = false
 	_stamina_pressure_reported = false
 	_near_death_reported = false
+	_aura_damage_reported = false
 
 
 func _update_survival_pressure_thoughts() -> void:
@@ -2800,15 +2857,20 @@ func _update_survival_pressure_thoughts() -> void:
 	elif fear < 48.0:
 		_fear_pressure_reported = false
 
-	if hunger <= 30.0 and not _hunger_pressure_reported:
+	if hunger >= 70.0 and not _hunger_pressure_reported:
 		_hunger_pressure_reported = true
 		ari_memory.record_event("hunger_pressure", {
 			"hunger": hunger,
 			"day": day_night.day,
 			"phase": day_night.phase,
 		})
+		ari_memory.record_event("hunger_high", {
+			"hunger": hunger,
+			"day": day_night.day,
+			"phase": day_night.phase,
+		})
 		_show_ari_thought("My stomach is turning every plan into panic.", true)
-	elif hunger > 50.0:
+	elif hunger < 50.0:
 		_hunger_pressure_reported = false
 
 	if stamina <= 26.0 and not _stamina_pressure_reported:

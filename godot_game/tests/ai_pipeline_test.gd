@@ -10,6 +10,7 @@ const SleepConsolidationScript = preload("res://scripts/ari/SleepConsolidation.g
 const LifeArchiveScript = preload("res://scripts/ari/LifeArchive.gd")
 const PermanentInsightBookScript = preload("res://scripts/ari/PermanentInsightBook.gd")
 const WisdomSynthesizerScript = preload("res://scripts/ari/WisdomSynthesizer.gd")
+const AriControllerScript = preload("res://scripts/ari/AriController.gd")
 const AriMindScript = preload("res://scripts/ari/AriMind.gd")
 const SignMindScript = preload("res://scripts/ari/SignMind.gd")
 const EnemyControllerScript = preload("res://scripts/enemies/EnemyController.gd")
@@ -31,6 +32,8 @@ func _run() -> void:
 	_test_deep_interpretation_contract(bridge)
 	_test_local_combat_signs()
 	_test_local_tower_range_signs()
+	_test_farming_hunger_rest_behavior()
+	_test_library_reflection_v1_contract()
 	_test_enemy_variety_stats()
 	_test_wave_director_escalates_without_flying()
 	_test_ai_tactical_priority_jobs()
@@ -341,6 +344,133 @@ func _test_local_tower_range_signs() -> void:
 	sign_mind.free()
 
 
+func _test_farming_hunger_rest_behavior() -> void:
+	var ari: AriController = AriControllerScript.new()
+	ari.reset_run()
+	var starting_hunger := float(ari.get("hunger"))
+	ari.advance_survival_needs(10.0, "morning")
+	_assert(float(ari.get("hunger")) > starting_hunger, "Ari hunger should rise over time")
+
+	ari.set("hunger", 82.0)
+	ari.restore_from_food(30.0)
+	_assert(float(ari.get("hunger")) < 82.0, "eating should reduce hunger pressure")
+
+	ari.set("hp", 52.0)
+	ari.set("fear", 74.0)
+	ari.set("stamina", 26.0)
+	ari.set("hunger", 66.0)
+	ari.restore_from_rest(2.0)
+	_assert(float(ari.get("hp")) > 52.0, "rest should recover HP")
+	_assert(float(ari.get("fear")) < 74.0, "rest should lower fear")
+	_assert(float(ari.get("stamina")) > 26.0, "rest should recover stamina")
+	_assert(float(ari.get("hunger")) <= 66.0, "rest should not increase hunger pressure")
+	ari.free()
+
+	var sign_mind: SignMind = SignMindScript.new()
+	var food_sign := sign_mind.interpret_sign("full stomach, quiet heart, long life")
+	var food_hints: Dictionary = food_sign.get("priority_hints", {})
+	_assert(float(food_hints.get("farm_food", 0.0)) > 0.0, "SignMind should read full stomach as food intent")
+	_assert(float(food_hints.get("rest", 0.0)) > 0.0, "SignMind should read quiet heart as rest intent")
+
+	var rest_sign := sign_mind.interpret_sign("I really need some time for myself to breathe")
+	var rest_hints: Dictionary = rest_sign.get("priority_hints", {})
+	_assert(float(rest_hints.get("rest", 0.0)) > 0.0, "SignMind should read time for myself and breathe as rest intent")
+	sign_mind.free()
+
+	var ari_mind: AriMind = AriMindScript.new()
+	var eat_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"food": 1,
+		"needs": {"hunger": 82.0, "stamina": 92.0, "fear": 18.0},
+	}))
+	_assert(eat_decision.get("job", "") == "eat_food", "high hunger with food should make Ari eat")
+
+	var farm_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"food": 0,
+		"needs": {"hunger": 76.0, "stamina": 92.0, "fear": 18.0},
+	}))
+	_assert(farm_decision.get("job", "") == "farm_food", "high hunger without food should make Ari farm")
+
+	var rest_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 2,
+		"ari_hp_ratio": 0.34,
+		"needs": {"hunger": 22.0, "stamina": 88.0, "fear": 20.0},
+	}))
+	_assert(rest_decision.get("job", "") == "rest", "low HP with defenses should make Ari rest")
+
+	var rest_sign_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 2,
+		"priority_hints": {"rest": 0.9},
+		"needs": {"hunger": 22.0, "stamina": 88.0, "fear": 20.0},
+	}))
+	_assert(rest_sign_decision.get("job", "") == "rest", "rest sign should make Ari rest when defenses exist")
+
+	var raw_eat_hint_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"food": 0,
+		"priority_hints": {"eat": 0.9},
+		"needs": {"hunger": 30.0, "stamina": 90.0, "fear": 18.0},
+	}))
+	_assert(raw_eat_hint_decision.get("job", "") == "farm_food", "raw eat AI hint should make Ari prepare food")
+	ari_mind.free()
+
+
+func _test_library_reflection_v1_contract() -> void:
+	_assert(ResourceLoader.exists("res://scenes/stations/Library.tscn"), "Library v1 should expose a Library.tscn station resource")
+
+	var sign_mind: SignMind = SignMindScript.new()
+	var why_sign := sign_mind.interpret_sign("why did the wall fail")
+	var why_hints: Dictionary = why_sign.get("priority_hints", {})
+	_assert(float(why_hints.get("reflect_library", 0.0)) > 0.0, "SignMind should read why/mistake language as library reflection")
+	sign_mind.free()
+
+	var memory = AriMemoryScript.new()
+	_assert(memory.has_method("create_lifetime_note_from_recent_events"), "AriMemory should create lifetime notes from recent events")
+	_assert(memory.has_method("get_lifetime_notes"), "AriMemory should expose lifetime notes")
+	_assert(memory.has_method("get_note_priority_bias"), "AriMemory should expose newest-note priority bias")
+	if not memory.has_method("create_lifetime_note_from_recent_events"):
+		return
+
+	memory.record_event("structure_destroyed", {"structure_type": "wall", "day": 2, "phase": "night"})
+	var note: Dictionary = memory.call("create_lifetime_note_from_recent_events", 2)
+	_assert(str(note.get("title", "")).to_lower().contains("wall"), "library note should title the wall failure")
+	_assert(str(note.get("markdown_text", "")).begins_with("#"), "library note should have markdown-like text")
+	_assert(note.get("tags", []).has("structure_destroyed"), "library note should tag the source event")
+	var note_hints: Dictionary = note.get("priority_hints", {})
+	_assert(float(note_hints.get("build_wall", 0.0)) > 0.0 or float(note_hints.get("place_aura_orb", 0.0)) > 0.0, "library note should carry soft priority hints")
+	_assert(int(note.get("created_day", 0)) == 2, "library note should store created day")
+	_assert(memory.call("get_lifetime_notes").size() == 1, "memory should store the created lifetime note")
+
+	var duplicate_note: Dictionary = memory.call("create_lifetime_note_from_recent_events", 2)
+	_assert(duplicate_note.is_empty(), "reflection should not spam duplicate notes for the same event")
+
+	memory.record_event("enemy_killed", {"enemy_type": "runner", "day": 2, "phase": "night"})
+	var second_note: Dictionary = memory.call("create_lifetime_note_from_recent_events", 2)
+	_assert(not second_note.is_empty(), "a new meaningful event should allow a new lifetime note")
+	var bias: Dictionary = memory.call("get_note_priority_bias")
+	_assert(float(bias.get("place_aura_orb", 0.0)) > 0.0 or float(bias.get("train_combat", 0.0)) > 0.0, "newest note should softly bias future priorities")
+
+	var reflection = ReflectionSystemScript.new()
+	var safe_note: Dictionary = reflection._validate_reflection({
+		"title": "Day 2 - The tower saved me",
+		"markdown_text": "# Day 2\n\nThe tower helped.",
+		"tags": ["tower_ranged_success"],
+		"priority_hints": {"build_tower": 0.4},
+		"created_day": 2,
+	})
+	_assert(safe_note.has("markdown_text"), "ReflectionSystem should preserve markdown_text")
+	_assert(safe_note.has("tags"), "ReflectionSystem should preserve note tags")
+	_assert(safe_note.has("priority_hints"), "ReflectionSystem should preserve priority_hints")
+
+	var ari_mind: AriMind = AriMindScript.new()
+	var curious_reflect_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 2,
+		"meaningful_event_count": 1,
+		"personality": {"fearfulness": 0.25, "aggression": 0.2, "curiosity": 0.92},
+		"needs": {"hunger": 24.0, "stamina": 90.0, "fear": 18.0},
+	}))
+	_assert(curious_reflect_decision.get("job", "") == "reflect_library", "curious Ari should reflect after a meaningful event when needs are stable")
+	ari_mind.free()
+
+
 func _test_enemy_variety_stats() -> void:
 	var zombie: EnemyController = EnemyControllerScript.new()
 	zombie.configure_type("zombie")
@@ -405,7 +535,7 @@ func _base_mind_context(overrides: Dictionary) -> Dictionary:
 		"damaged_structure_count": 0,
 		"lowest_structure_hp_ratio": 1.0,
 		"combat_stats": {"combat_level": 0.0},
-		"needs": {"hunger": 72.0, "stamina": 92.0, "fear": 18.0},
+		"needs": {"hunger": 28.0, "stamina": 92.0, "fear": 18.0},
 		"food": 2,
 		"lesson_count": 0,
 		"lesson_priority_bias": {},

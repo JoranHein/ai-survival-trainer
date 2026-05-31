@@ -18,7 +18,7 @@ signal job_changed(job: String, reason: String)
 @export var max_fear := 100.0
 
 var hp := 100.0
-var hunger := 72.0
+var hunger := 28.0
 var stamina := 92.0
 var fear := 18.0
 var mining_enabled := false
@@ -56,7 +56,7 @@ func _ready() -> void:
 func reset_run() -> void:
 	_ensure_base_move_speed()
 	hp = max_hp
-	hunger = 72.0
+	hunger = 28.0
 	stamina = 92.0
 	fear = 18.0
 	mining_enabled = false
@@ -116,12 +116,12 @@ func advance_survival_needs(delta: float, phase: String) -> void:
 	if not is_alive():
 		return
 	var safe_delta := maxf(delta, 0.0)
-	var hunger_drain := 0.11
+	var hunger_gain := 0.11
 	if current_action.begins_with("moving"):
-		hunger_drain += 0.04
+		hunger_gain += 0.04
 	if current_action == "training combat" or current_action == "mining":
-		hunger_drain += 0.05
-	hunger = maxf(0.0, hunger - hunger_drain * safe_delta)
+		hunger_gain += 0.05
+	hunger = minf(max_hunger, hunger + hunger_gain * safe_delta)
 
 	if current_action.begins_with("moving") or current_action == "training combat" or current_action == "mining":
 		stamina = maxf(0.0, stamina - 0.18 * safe_delta)
@@ -136,7 +136,7 @@ func advance_survival_needs(delta: float, phase: String) -> void:
 		_:
 			fear = maxf(0.0, fear - 0.06 * safe_delta)
 
-	if hunger <= 0.0:
+	if hunger >= max_hunger:
 		take_damage(1.2 * safe_delta)
 
 
@@ -383,7 +383,7 @@ func get_needs() -> Dictionary:
 
 
 func restore_from_food(food_power := 28.0) -> void:
-	hunger = minf(max_hunger, hunger + maxf(float(food_power), 0.0))
+	hunger = maxf(0.0, hunger - maxf(float(food_power), 0.0))
 	stamina = minf(max_stamina, stamina + 10.0)
 	fear = maxf(0.0, fear - 5.0)
 	queue_redraw()
@@ -581,10 +581,10 @@ func _draw_need_state_cues() -> void:
 	var hunger_ratio := _safe_ratio(hunger, max_hunger)
 	var stamina_ratio := _safe_ratio(stamina, max_stamina)
 	var fear_ratio := _safe_ratio(fear, max_fear)
-	if hunger_ratio >= 0.66 and stamina_ratio >= 0.64 and fear_ratio <= 0.34:
+	if hunger_ratio <= 0.34 and stamina_ratio >= 0.64 and fear_ratio <= 0.34:
 		_draw_calm_cue()
 		return
-	if hunger_ratio < 0.66:
+	if hunger_ratio > 0.34:
 		_draw_need_chip(Vector2(-24.0, 18.0), Color(0.95, 0.56, 0.24, 1.0), hunger_ratio, "hunger")
 	if stamina_ratio < 0.64:
 		_draw_need_chip(Vector2(0.0, 24.0), Color(0.42, 0.88, 0.66, 1.0), stamina_ratio, "stamina")
@@ -593,7 +593,7 @@ func _draw_need_state_cues() -> void:
 
 
 func _draw_need_chip(center: Vector2, color: Color, ratio: float, kind: String) -> void:
-	var fill := clampf(1.0 - ratio, 0.0, 1.0)
+	var fill := clampf(ratio if kind == "hunger" else 1.0 - ratio, 0.0, 1.0)
 	draw_circle(center, 7.0, Color(color.r, color.g, color.b, 0.22 + fill * 0.28))
 	draw_arc(center, 7.0, -PI * 0.50, -PI * 0.50 + TAU * fill, 18, color.lightened(0.18), 2.0)
 	match kind:

@@ -30,9 +30,11 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var hunger := float(needs.get("hunger", 100.0))
 	var stamina := float(needs.get("stamina", 100.0))
 	var fear := float(needs.get("fear", 0.0))
+	var ari_hp_ratio := clampf(float(context.get("ari_hp_ratio", 1.0)), 0.0, 1.0)
 	var stone := int(context.get("stone", 0))
 	var food := int(context.get("food", 0))
 	var lesson_count := int(context.get("lesson_count", 0))
+	var meaningful_event_count := int(context.get("meaningful_event_count", 0))
 	var wall_cost := int(context.get("wall_cost", 0))
 	var aura_orb_cost := int(context.get("aura_orb_cost", 0))
 	var spike_trap_cost := int(context.get("spike_trap_cost", 0))
@@ -72,7 +74,10 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 		maxf(_hint(priority_hints, "combat_training"), _hint(priority_hints, "train_combat")),
 		maxf(_hint(priority_hints, "fight"), _hint(priority_hints, "prepare_weapon"))
 	)
-	var sign_food_preference := _hint(priority_hints, "farm_food")
+	var sign_food_preference := maxf(
+		_hint(priority_hints, "farm_food"),
+		maxf(_hint(priority_hints, "eat"), _hint(priority_hints, "eat_food"))
+	)
 	var sign_trap_preference := _hint(priority_hints, "build_trap")
 	var sign_tower_preference := maxf(_hint(priority_hints, "build_tower"), _hint(priority_hints, "use_tower"))
 	var sign_ranged_preference := maxf(
@@ -111,6 +116,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var storm_preference := sign_storm_preference
 	var rest_preference := sign_rest_preference
 	var reflect_preference := sign_reflect_preference
+	var survival_needs_stable := hunger < 58.0 and stamina > 34.0 and fear < 70.0 and ari_hp_ratio > 0.45
 	var defensive_wait_preference := maxf(_hint(priority_hints, "defensive_wait"), maxf(cover_preference, _hint(priority_hints, "wait_or_idle")))
 	if runner_pressure > 0.0:
 		cover_preference = maxf(cover_preference, 0.34 + runner_pressure * 0.12)
@@ -128,7 +134,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	mining_preference = clampf(mining_preference + (curiosity * 0.10 if mining_preference > 0.0 else 0.0), 0.0, 1.0)
 	range_preference = clampf(range_preference + (aggression * 0.14 if range_preference > 0.0 else 0.0), 0.0, 1.0)
 	combat_preference = clampf(combat_preference + (aggression * 0.28 if sign_combat_preference > 0.0 or aggression >= 0.72 else 0.0), 0.0, 1.0)
-	food_preference = clampf(food_preference + (0.45 if hunger < 42.0 else 0.0) + _build_strength(run_build, "farming") * 0.22, 0.0, 1.0)
+	food_preference = clampf(food_preference + (0.45 if hunger > 58.0 else 0.0) + _build_strength(run_build, "farming") * 0.22, 0.0, 1.0)
 	trap_preference = clampf(trap_preference + trapcraft_instinct * 0.28 + (curiosity * 0.08 if sign_trap_preference > 0.0 else 0.0), 0.0, 1.0)
 	tower_preference = clampf(tower_preference + _build_strength(run_build, "bow") * 0.24 + _build_strength(run_build, "attack_range") * 0.22, 0.0, 1.0)
 	tar_pit_preference = clampf(tar_pit_preference + trapcraft_instinct * 0.20 + (fearfulness * 0.10 if sign_tar_pit_preference > 0.0 else 0.0), 0.0, 1.0)
@@ -138,8 +144,8 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	repair_bench_preference = clampf(repair_bench_preference + building_instinct * 0.10 + defense_instinct * 0.10 + (fearfulness * 0.10 if sign_repair_bench_preference > 0.0 else 0.0), 0.0, 1.0)
 	repair_preference = clampf(repair_preference + building_instinct * 0.12 + defense_instinct * 0.16 + (0.40 if lowest_structure_hp_ratio < 0.55 else 0.0) + (0.20 if damaged_structure_count >= 2 else 0.0), 0.0, 1.0)
 	storm_preference = clampf(storm_preference + _build_strength(run_build, "attack_range") * 0.18 + warding_instinct * 0.10 + (fearfulness * 0.10 + curiosity * 0.08 if sign_storm_preference > 0.0 else 0.0), 0.0, 1.0)
-	rest_preference = clampf(rest_preference + (fear / 100.0) * 0.20 + (0.28 if stamina < 38.0 else 0.0) + _build_strength(run_build, "regeneration") * 0.18, 0.0, 1.0)
-	reflect_preference = clampf(reflect_preference + curiosity * 0.12 + _build_strength(run_build, "curiosity") * 0.18, 0.0, 1.0)
+	rest_preference = clampf(rest_preference + (fear / 100.0) * 0.20 + (0.34 if ari_hp_ratio <= 0.45 else 0.0) + (0.28 if stamina < 38.0 else 0.0) + _build_strength(run_build, "regeneration") * 0.18, 0.0, 1.0)
+	reflect_preference = clampf(reflect_preference + curiosity * 0.12 + _build_strength(run_build, "curiosity") * 0.18 + (0.36 if meaningful_event_count > 0 else 0.0), 0.0, 1.0)
 	if sign_combat_preference > 0.0 and (range_preference > 0.0 or wall_preference > 0.0 or defensive_wait_preference > 0.0):
 		combat_preference = clampf(combat_preference + fearfulness * 0.12, 0.0, 1.0)
 	defensive_wait_preference = clampf(defensive_wait_preference + (fearfulness * 0.25 if defensive_wait_preference > 0.0 or fearfulness >= 0.66 else 0.0) - aggression * 0.25, 0.0, 1.0)
@@ -182,17 +188,20 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	if night_close and has_defenses and aggression < 0.65:
 		return _job("wait_or_idle", "Night is close; stay near defenses")
 
-	if hunger < 36.0 and food > 0:
+	if hunger > 64.0 and food > 0:
 		return _job("eat_food", "Hunger is becoming dangerous")
 
-	if (food_preference > 0.20 or hunger < 58.0) and food < 3:
+	if (food_preference > 0.20 or hunger > 42.0) and food < 3:
 		return _job("farm_food", "Need food before night" if sign_food_preference <= 0.0 else "Sign points to food")
 
 	if (rest_preference > 0.28 or fear > 64.0 or stamina < 34.0) and has_defenses:
 		return _job("rest", "Need calm before night" if sign_rest_preference <= 0.0 else "Sign asks for quiet")
 
-	if sign_reflect_preference > 0.25 and lesson_count < 2 and not night_close:
+	if sign_reflect_preference > 0.25 and lesson_count < 2 and not night_close and survival_needs_stable:
 		return _job("reflect_library", "Sign wants a lesson")
+
+	if reflect_preference > 0.45 and lesson_count < 2 and meaningful_event_count > 0 and has_defenses and not night_close and survival_needs_stable:
+		return _job("reflect_library", "Recent events need a lesson" if sign_reflect_preference <= 0.0 else "Sign wants a lesson")
 
 	if damaged_structure_count > 0 and repair_preference > 0.30:
 		return _job("repair_structure", "Patch damaged defenses" if sign_repair_preference <= 0.0 else "Sign says repair what broke")
@@ -293,9 +302,6 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 
 	if range_preference > 0.0:
 		return _job("wait_or_idle", "Sign asks for arrows; no bow yet")
-
-	if reflect_preference > 0.45 and lesson_count < 1 and has_defenses and not night_close:
-		return _job("reflect_library", "Curiosity wants a lesson")
 
 	if defensive_wait_preference > 0.0 and has_defenses:
 		return _job("wait_or_idle", "Sign asks for safety")
@@ -455,13 +461,13 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 		"farm_food":
 			if lower_reason.find("sign points") >= 0:
 				return "The sign says food. A full stomach might keep fear quiet."
-			return "Food first. Fear is louder on an empty stomach."
+			return "If I am fed, the night feels smaller."
 		"eat_food":
-			return "I need to eat before hunger becomes another enemy."
+			return "A full stomach is a wall inside me."
 		"rest":
 			if lower_reason.find("quiet") >= 0:
-				return "The sign asks for quiet. I should steady myself."
-			return "I need a little rest before the dark arrives."
+				return "I need quiet. I cannot think with the dark touching me."
+			return "I should rest before fear makes decisions."
 		"reflect_library":
 			if lower_reason.find("sign") >= 0:
 				return "The sign wants memory. I should read what happened."

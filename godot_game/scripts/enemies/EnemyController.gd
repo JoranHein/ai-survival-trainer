@@ -125,7 +125,10 @@ func _move_or_attack_structure(structure: Node, delta: float) -> void:
 	var distance := _distance_to_rect(global_position, rect)
 	if distance <= attack_range:
 		if _attack_cooldown <= 0.0:
-			structure.call("take_damage", structure_attack_damage * _attack_damage_multiplier())
+			var damage := structure_attack_damage * _attack_damage_multiplier()
+			structure.call("take_damage", damage)
+			if world != null and world.has_method("record_structure_damaged"):
+				world.call("record_structure_damaged", structure, damage)
 			_apply_contact_recoil(structure_position)
 			_attack_cooldown = attack_cooldown_seconds
 		return
@@ -147,7 +150,10 @@ func _move_or_attack_attraction(attraction: Node2D, delta: float) -> void:
 	if distance > attack_range:
 		global_position += to_attraction.normalized() * speed * _speed_multiplier() * delta
 	elif _attack_cooldown <= 0.0:
-		attraction.call("take_damage", structure_attack_damage * _attack_damage_multiplier())
+		var damage := structure_attack_damage * _attack_damage_multiplier()
+		attraction.call("take_damage", damage)
+		if world != null and world.has_method("record_structure_damaged"):
+			world.call("record_structure_damaged", attraction, damage)
 		_apply_contact_recoil(attraction.global_position)
 		_attack_cooldown = attack_cooldown_seconds
 

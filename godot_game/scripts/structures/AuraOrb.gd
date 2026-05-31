@@ -44,7 +44,10 @@ func _damage_enemies(delta: float) -> void:
 			continue
 		var enemy_position: Vector2 = enemy.get("global_position")
 		if global_position.distance_to(enemy_position) <= aura_radius:
-			enemy.call("take_damage", damage_per_second * maxf(delta, 0.0))
+			var damage := damage_per_second * maxf(delta, 0.0)
+			enemy.call("take_damage", damage)
+			if world.has_method("record_aura_damage_success"):
+				world.call("record_aura_damage_success", enemy, damage)
 
 
 func _draw() -> void:
