@@ -12,43 +12,129 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 
 	var wall_count := int(context.get("wall_count", 0))
 	var aura_orb_count := int(context.get("aura_orb_count", 0))
+	var spike_trap_count := int(context.get("spike_trap_count", 0))
+	var bow_tower_count := int(context.get("bow_tower_count", 0))
+	var tar_pit_count := int(context.get("tar_pit_count", 0))
+	var fear_lantern_count := int(context.get("fear_lantern_count", 0))
+	var decoy_idol_count := int(context.get("decoy_idol_count", 0))
+	var thorn_totem_count := int(context.get("thorn_totem_count", 0))
+	var repair_bench_count := int(context.get("repair_bench_count", 0))
+	var storm_rod_count := int(context.get("storm_rod_count", 0))
+	var damaged_structure_count := int(context.get("damaged_structure_count", 0))
+	var lowest_structure_hp_ratio := float(context.get("lowest_structure_hp_ratio", 1.0))
+	var combat_stats := _combat_stats(context)
+	var combat_level := float(combat_stats.get("combat_level", 0.0))
+	var needs := _needs(context)
+	var hunger := float(needs.get("hunger", 100.0))
+	var stamina := float(needs.get("stamina", 100.0))
+	var fear := float(needs.get("fear", 0.0))
 	var stone := int(context.get("stone", 0))
+	var food := int(context.get("food", 0))
+	var lesson_count := int(context.get("lesson_count", 0))
 	var wall_cost := int(context.get("wall_cost", 0))
 	var aura_orb_cost := int(context.get("aura_orb_cost", 0))
+	var spike_trap_cost := int(context.get("spike_trap_cost", 0))
+	var bow_tower_cost := int(context.get("bow_tower_cost", 0))
+	var tar_pit_cost := int(context.get("tar_pit_cost", 0))
+	var fear_lantern_cost := int(context.get("fear_lantern_cost", 0))
+	var decoy_idol_cost := int(context.get("decoy_idol_cost", 0))
+	var thorn_totem_cost := int(context.get("thorn_totem_cost", 0))
+	var repair_bench_cost := int(context.get("repair_bench_cost", 0))
+	var storm_rod_cost := int(context.get("storm_rod_cost", 0))
 	var night_close := bool(context.get("night_close", false))
 	var has_defenses := wall_count > 0 or aura_orb_count > 0
 	var priority_hints := _priority_hints(context)
+	var lesson_bias := _lesson_bias(context)
 	var personality := _personality(context)
 	var run_build := _run_build(context)
 	var fearfulness := _trait(personality, "fearfulness")
 	var aggression := _trait(personality, "aggression")
 	var curiosity := _trait(personality, "curiosity")
-	var perseverance := _trait(personality, "perseverance")
 	var mining_points := _build_points(run_build, "mining")
 	var building_points := _build_points(run_build, "building")
 	var warding_points := _build_points(run_build, "warding")
 	var mining_instinct := _build_strength(run_build, "mining")
 	var building_instinct := _build_strength(run_build, "building")
 	var warding_instinct := _build_strength(run_build, "warding")
+	var trapcraft_instinct := _build_strength(run_build, "trapcraft")
 	var defense_instinct := _build_strength(run_build, "defense")
 	var fear_control_instinct := _build_strength(run_build, "fear_control")
+	var thorns_instinct := _build_strength(run_build, "thorns")
 	var sign_wall_preference := _hint(priority_hints, "wall")
 	var sign_aura_preference := _hint(priority_hints, "aura_orb")
 	var sign_mining_preference := _hint(priority_hints, "mining")
+	var sign_combat_preference := _hint(priority_hints, "combat_training")
+	var sign_food_preference := _hint(priority_hints, "farm_food")
+	var sign_trap_preference := _hint(priority_hints, "build_trap")
+	var sign_tower_preference := _hint(priority_hints, "build_tower")
+	var sign_tar_pit_preference := _hint(priority_hints, "build_tar_pit")
+	var sign_lantern_preference := _hint(priority_hints, "build_fear_lantern")
+	var sign_decoy_preference := _hint(priority_hints, "build_decoy_idol")
+	var sign_thorn_preference := _hint(priority_hints, "build_thorn_totem")
+	var sign_repair_bench_preference := _hint(priority_hints, "build_repair_bench")
+	var sign_repair_preference := _hint(priority_hints, "repair_structure")
+	var sign_storm_preference := _hint(priority_hints, "build_storm_rod")
+	var sign_rest_preference := _hint(priority_hints, "rest")
+	var sign_reflect_preference := _hint(priority_hints, "reflect_library")
 	var wall_preference := sign_wall_preference
 	var aura_preference := sign_aura_preference
 	var mining_preference := sign_mining_preference
+	var combat_preference := sign_combat_preference
+	var food_preference := sign_food_preference
+	var trap_preference := sign_trap_preference
 	var range_preference := _hint(priority_hints, "range")
+	var tower_preference := maxf(sign_tower_preference, range_preference)
+	var tar_pit_preference := sign_tar_pit_preference
+	var lantern_preference := sign_lantern_preference
+	var decoy_preference := sign_decoy_preference
+	var thorn_preference := sign_thorn_preference
+	var repair_bench_preference := sign_repair_bench_preference
+	var repair_preference := maxf(sign_repair_preference, sign_repair_bench_preference * 0.35)
+	var storm_preference := sign_storm_preference
+	var rest_preference := sign_rest_preference
+	var reflect_preference := sign_reflect_preference
 	var defensive_wait_preference := _hint(priority_hints, "defensive_wait")
 	wall_preference = clampf(wall_preference + (fearfulness * 0.22 if wall_preference > 0.0 or fearfulness >= 0.66 else 0.0), 0.0, 1.0)
 	aura_preference = clampf(aura_preference + (fearfulness * 0.12 + curiosity * 0.10 if aura_preference > 0.0 else 0.0), 0.0, 1.0)
 	mining_preference = clampf(mining_preference + (curiosity * 0.10 if mining_preference > 0.0 else 0.0), 0.0, 1.0)
 	range_preference = clampf(range_preference + (aggression * 0.14 if range_preference > 0.0 else 0.0), 0.0, 1.0)
+	combat_preference = clampf(combat_preference + (aggression * 0.28 if sign_combat_preference > 0.0 or aggression >= 0.72 else 0.0), 0.0, 1.0)
+	food_preference = clampf(food_preference + (0.45 if hunger < 42.0 else 0.0) + _build_strength(run_build, "farming") * 0.22, 0.0, 1.0)
+	trap_preference = clampf(trap_preference + trapcraft_instinct * 0.28 + (curiosity * 0.08 if sign_trap_preference > 0.0 else 0.0), 0.0, 1.0)
+	tower_preference = clampf(tower_preference + _build_strength(run_build, "bow") * 0.24 + _build_strength(run_build, "attack_range") * 0.22, 0.0, 1.0)
+	tar_pit_preference = clampf(tar_pit_preference + trapcraft_instinct * 0.20 + (fearfulness * 0.10 if sign_tar_pit_preference > 0.0 else 0.0), 0.0, 1.0)
+	lantern_preference = clampf(lantern_preference + fear_control_instinct * 0.24 + warding_instinct * 0.08 + (fearfulness * 0.18 if sign_lantern_preference > 0.0 or fear > 56.0 else 0.0), 0.0, 1.0)
+	decoy_preference = clampf(decoy_preference + trapcraft_instinct * 0.14 + (fearfulness * 0.14 if sign_decoy_preference > 0.0 else 0.0), 0.0, 1.0)
+	thorn_preference = clampf(thorn_preference + thorns_instinct * 0.30 + defense_instinct * 0.08 + (aggression * 0.10 + fearfulness * 0.08 if sign_thorn_preference > 0.0 else 0.0), 0.0, 1.0)
+	repair_bench_preference = clampf(repair_bench_preference + building_instinct * 0.10 + defense_instinct * 0.10 + (fearfulness * 0.10 if sign_repair_bench_preference > 0.0 else 0.0), 0.0, 1.0)
+	repair_preference = clampf(repair_preference + building_instinct * 0.12 + defense_instinct * 0.16 + (0.40 if lowest_structure_hp_ratio < 0.55 else 0.0) + (0.20 if damaged_structure_count >= 2 else 0.0), 0.0, 1.0)
+	storm_preference = clampf(storm_preference + _build_strength(run_build, "attack_range") * 0.18 + warding_instinct * 0.10 + (fearfulness * 0.10 + curiosity * 0.08 if sign_storm_preference > 0.0 else 0.0), 0.0, 1.0)
+	rest_preference = clampf(rest_preference + (fear / 100.0) * 0.20 + (0.28 if stamina < 38.0 else 0.0) + _build_strength(run_build, "regeneration") * 0.18, 0.0, 1.0)
+	reflect_preference = clampf(reflect_preference + curiosity * 0.12 + _build_strength(run_build, "curiosity") * 0.18, 0.0, 1.0)
+	if sign_combat_preference > 0.0 and (range_preference > 0.0 or wall_preference > 0.0 or defensive_wait_preference > 0.0):
+		combat_preference = clampf(combat_preference + fearfulness * 0.12, 0.0, 1.0)
 	defensive_wait_preference = clampf(defensive_wait_preference + (fearfulness * 0.25 if defensive_wait_preference > 0.0 or fearfulness >= 0.66 else 0.0) - aggression * 0.25, 0.0, 1.0)
 	wall_preference = clampf(wall_preference + building_instinct * 0.18, 0.0, 1.0)
 	aura_preference = clampf(aura_preference + warding_instinct * 0.24, 0.0, 1.0)
 	mining_preference = clampf(mining_preference + mining_instinct * 0.18, 0.0, 1.0)
+	combat_preference = clampf(combat_preference + defense_instinct * 0.10 + fear_control_instinct * 0.08 + curiosity * 0.04, 0.0, 1.0)
 	defensive_wait_preference = clampf(defensive_wait_preference + fear_control_instinct * 0.12 + defense_instinct * 0.08, 0.0, 1.0)
+	wall_preference = clampf(wall_preference + _hint(lesson_bias, "build_wall"), 0.0, 1.0)
+	aura_preference = clampf(aura_preference + _hint(lesson_bias, "place_aura_orb"), 0.0, 1.0)
+	mining_preference = clampf(mining_preference + _hint(lesson_bias, "mine_stone"), 0.0, 1.0)
+	combat_preference = clampf(combat_preference + _hint(lesson_bias, "train_combat"), 0.0, 1.0)
+	food_preference = clampf(food_preference + _hint(lesson_bias, "farm_food"), 0.0, 1.0)
+	trap_preference = clampf(trap_preference + _hint(lesson_bias, "build_trap"), 0.0, 1.0)
+	tower_preference = clampf(tower_preference + _hint(lesson_bias, "build_tower"), 0.0, 1.0)
+	tar_pit_preference = clampf(tar_pit_preference + _hint(lesson_bias, "build_tar_pit"), 0.0, 1.0)
+	lantern_preference = clampf(lantern_preference + _hint(lesson_bias, "build_fear_lantern"), 0.0, 1.0)
+	decoy_preference = clampf(decoy_preference + _hint(lesson_bias, "build_decoy_idol"), 0.0, 1.0)
+	thorn_preference = clampf(thorn_preference + _hint(lesson_bias, "build_thorn_totem"), 0.0, 1.0)
+	repair_bench_preference = clampf(repair_bench_preference + _hint(lesson_bias, "build_repair_bench"), 0.0, 1.0)
+	repair_preference = clampf(repair_preference + _hint(lesson_bias, "repair_structure"), 0.0, 1.0)
+	storm_preference = clampf(storm_preference + _hint(lesson_bias, "build_storm_rod"), 0.0, 1.0)
+	rest_preference = clampf(rest_preference + _hint(lesson_bias, "rest"), 0.0, 1.0)
+	reflect_preference = clampf(reflect_preference + _hint(lesson_bias, "reflect_library"), 0.0, 1.0)
 	var desired_wall_count := target_wall_count
 	if fearfulness >= 0.66:
 		desired_wall_count += 1
@@ -61,21 +147,72 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	if wall_preference >= 0.85:
 		desired_wall_count += 1
 
-	var current_job := str(context.get("current_job", "wait_or_idle"))
 	var desired_stone_reserve := maxi(wall_cost, aura_orb_cost) + int(ceil(mining_preference * 4.0)) + int(ceil(float(mining_points) * 0.5))
-	if perseverance >= 0.70:
-		var sticky_job := _sticky_job(current_job, stone, wall_cost, aura_orb_cost, wall_count, aura_orb_count, desired_wall_count, desired_stone_reserve)
-		if sticky_job != "":
-			return _job(sticky_job, _sticky_reason(sticky_job))
+	var desired_combat_level := 0.25 + combat_preference * 2.1 + aggression * 0.35 + defense_instinct * 0.30 + fear_control_instinct * 0.20
 
 	if night_close and has_defenses and aggression < 0.65:
 		return _job("wait_or_idle", "Night is close; stay near defenses")
+
+	if hunger < 36.0 and food > 0:
+		return _job("eat_food", "Hunger is becoming dangerous")
+
+	if (food_preference > 0.20 or hunger < 58.0) and food < 3:
+		return _job("farm_food", "Need food before night" if sign_food_preference <= 0.0 else "Sign points to food")
+
+	if (rest_preference > 0.28 or fear > 64.0 or stamina < 34.0) and has_defenses:
+		return _job("rest", "Need calm before night" if sign_rest_preference <= 0.0 else "Sign asks for quiet")
+
+	if sign_reflect_preference > 0.25 and lesson_count < 2 and not night_close:
+		return _job("reflect_library", "Sign wants a lesson")
+
+	if damaged_structure_count > 0 and repair_preference > 0.30:
+		return _job("repair_structure", "Patch damaged defenses" if sign_repair_preference <= 0.0 else "Sign says repair what broke")
 
 	var aura_can_lead := wall_count > 0 or sign_aura_preference > 0.0 or warding_points >= 5
 	if aura_preference > 0.0 and aura_orb_count < target_aura_orb_count and aura_can_lead:
 		if stone < aura_orb_cost:
 			return _job("mine_stone", "Need stone for sign's light" if sign_aura_preference > 0.0 else "Need stone for Aura Orb")
 		return _job("place_aura_orb", "Sign points to light" if sign_aura_preference > 0.0 else "Build favors Aura Orb")
+
+	if trap_preference > 0.20 and spike_trap_count < 2 and has_defenses:
+		if stone < spike_trap_cost:
+			return _job("mine_stone", "Need stone for trap")
+		return _job("build_spike_trap", "Sign says the floor can fight" if sign_trap_preference > 0.0 else "Build favors traps")
+
+	if tar_pit_preference > 0.20 and tar_pit_count < 1 and has_defenses:
+		if stone < tar_pit_cost:
+			return _job("mine_stone", "Need stone for tar pit")
+		return _job("build_tar_pit", "Sign says slow the ground" if sign_tar_pit_preference > 0.0 else "Build favors slowing them")
+
+	if lantern_preference > 0.22 and fear_lantern_count < 1 and has_defenses:
+		if stone < fear_lantern_cost:
+			return _job("mine_stone", "Need stone for lantern")
+		return _job("build_fear_lantern", "Sign asks for warm safety" if sign_lantern_preference > 0.0 else "Fear needs a safe light")
+
+	if decoy_preference > 0.22 and decoy_idol_count < 1 and has_defenses:
+		if stone < decoy_idol_cost:
+			return _job("mine_stone", "Need stone for decoy")
+		return _job("build_decoy_idol", "Sign asks for bait" if sign_decoy_preference > 0.0 else "Build favors distraction")
+
+	if thorn_preference > 0.22 and thorn_totem_count < 1 and has_defenses:
+		if stone < thorn_totem_cost:
+			return _job("mine_stone", "Need stone for thorns")
+		return _job("build_thorn_totem", "Sign says touch should hurt" if sign_thorn_preference > 0.0 else "Build favors thorns")
+
+	if repair_bench_preference > 0.22 and repair_bench_count < 1 and has_defenses:
+		if stone < repair_bench_cost:
+			return _job("mine_stone", "Need stone for repair bench")
+		return _job("build_repair_bench", "Sign asks for repair tools" if sign_repair_bench_preference > 0.0 else "Build favors repair")
+
+	if storm_preference > 0.22 and storm_rod_count < 1 and has_defenses:
+		if stone < storm_rod_cost:
+			return _job("mine_stone", "Need stone for storm rod")
+		return _job("build_storm_rod", "Sign points to wings and sky" if sign_storm_preference > 0.0 else "Build favors anti-air")
+
+	if tower_preference > 0.22 and bow_tower_count < 1 and has_defenses:
+		if stone < bow_tower_cost:
+			return _job("mine_stone", "Need stone for tower")
+		return _job("build_bow_tower", "Sign asks for height and arrows" if sign_tower_preference > 0.0 or range_preference > 0.0 else "Build favors tower")
 
 	if mining_preference > 0.0 and stone < desired_stone_reserve:
 		return _job("mine_stone", "Sign keeps pointing to stone" if sign_mining_preference > 0.0 else "Build favors mining")
@@ -94,11 +231,23 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 			return _job("mine_stone", "Need stone for Aura Orb")
 		return _job("place_aura_orb", "No aura orb yet")
 
+	var basic_defenses_ready := wall_count >= mini(2, desired_wall_count) or (wall_count > 0 and aura_orb_count > 0)
+	var stone_not_urgent := stone >= mini(wall_cost, aura_orb_cost) or wall_count >= desired_wall_count
+	if combat_preference > 0.25 and basic_defenses_ready and stone_not_urgent and combat_level < desired_combat_level:
+		if sign_combat_preference > 0.0:
+			return _job("train_combat", "Sign says to prepare hands")
+		if aggression >= 0.72:
+			return _job("train_combat", "Aggression wants practice")
+		return _job("train_combat", "Build favors combat readiness")
+
 	if defensive_wait_preference > 0.25 and has_defenses and aggression < 0.55:
 		return _job("wait_or_idle", "Sign asks for safety")
 
 	if range_preference > 0.0:
 		return _job("wait_or_idle", "Sign asks for arrows; no bow yet")
+
+	if reflect_preference > 0.45 and lesson_count < 1 and has_defenses and not night_close:
+		return _job("reflect_library", "Curiosity wants a lesson")
 
 	if defensive_wait_preference > 0.0 and has_defenses:
 		return _job("wait_or_idle", "Sign asks for safety")
@@ -112,8 +261,6 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 		"mine_stone":
 			if lower_reason.find("build favors mining") >= 0:
 				return "This build starts with stone. I should fill my hands."
-			if lower_reason.find("sticking") >= 0:
-				return "I chose this plan. I should not drop it yet."
 			if lower_reason.find("sign keeps pointing") >= 0:
 				return "The sign keeps saying stone. I should mine more."
 			if lower_reason.find("aura") >= 0:
@@ -124,8 +271,6 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 		"build_wall":
 			if lower_reason.find("build favors walls") >= 0:
 				return "This build wants shape and cover. I will make walls."
-			if lower_reason.find("sticking") >= 0:
-				return "The wall plan still feels unfinished."
 			if lower_reason.find("sign wants") >= 0:
 				return "The sign wants walls. I can make the teeth wait outside."
 			if _trait(personality, "fearfulness") >= 0.68:
@@ -134,11 +279,65 @@ func thought_for_job(job: String, reason: String, personality := {}, run_build :
 		"place_aura_orb":
 			if lower_reason.find("build favors aura") >= 0:
 				return "This build trusts the circle. Let it hurt them first."
-			if lower_reason.find("sticking") >= 0:
-				return "The light plan is still the plan."
 			if _trait(personality, "curiosity") >= 0.66:
 				return "The orb feels like an answer I want to test."
 			return "The light can hurt them before they reach me."
+		"build_spike_trap":
+			if lower_reason.find("floor") >= 0:
+				return "The floor can fight before I have to."
+			return "A trap can make contact cost them something."
+		"build_bow_tower":
+			if lower_reason.find("height") >= 0 or lower_reason.find("arrows") >= 0:
+				return "If I stand high enough, maybe death has to climb."
+			return "Distance can be a kind of wall."
+		"build_tar_pit":
+			if lower_reason.find("slow") >= 0:
+				return "If the ground grabs them, I get more time."
+			return "Mud can make their teeth arrive late."
+		"build_fear_lantern":
+			if lower_reason.find("warm") >= 0:
+				return "A warm light might make my fear smaller."
+			return "I need one place where the dark feels weaker."
+		"build_decoy_idol":
+			if lower_reason.find("bait") >= 0:
+				return "Let the dead look at the idol instead of me."
+			return "A false me can buy the real me time."
+		"build_thorn_totem":
+			if lower_reason.find("touch") >= 0:
+				return "If they touch what protects me, they should bleed."
+			return "Thorns can make every bite cost them."
+		"build_repair_bench":
+			if lower_reason.find("tools") >= 0:
+				return "If the walls break, I need tools ready."
+			return "A bench can help me keep the weak things standing."
+		"repair_structure":
+			if lower_reason.find("sign says") >= 0:
+				return "The sign says repair. Broken safety is still worth saving."
+			return "This is damaged. I can make it hold a little longer."
+		"build_storm_rod":
+			if lower_reason.find("wings") >= 0 or lower_reason.find("sky") >= 0:
+				return "The wall did not reach the sky. The storm might."
+			return "If the air brings teeth, I need lightning above me."
+		"train_combat":
+			if lower_reason.find("prepare hands") >= 0:
+				return "The sign says teeth. I should prepare my hands."
+			if lower_reason.find("aggression") >= 0:
+				return "If I learn to hit harder, they reach me less."
+			return "The dummy does not bite. I can practice here."
+		"farm_food":
+			if lower_reason.find("sign points") >= 0:
+				return "The sign says food. A full stomach might keep fear quiet."
+			return "Food first. Fear is louder on an empty stomach."
+		"eat_food":
+			return "I need to eat before hunger becomes another enemy."
+		"rest":
+			if lower_reason.find("quiet") >= 0:
+				return "The sign asks for quiet. I should steady myself."
+			return "I need a little rest before the dark arrives."
+		"reflect_library":
+			if lower_reason.find("sign") >= 0:
+				return "The sign wants memory. I should read what happened."
+			return "Maybe the library can turn fear into a lesson."
 		"wait_or_idle":
 			if lower_reason.find("no bow yet") >= 0:
 				return "The sign wants arrows, but I do not have arrows yet."
@@ -166,6 +365,13 @@ func _priority_hints(context: Dictionary) -> Dictionary:
 	return {}
 
 
+func _lesson_bias(context: Dictionary) -> Dictionary:
+	var bias = context.get("lesson_priority_bias", {})
+	if typeof(bias) == TYPE_DICTIONARY:
+		return bias
+	return {}
+
+
 func _personality(context: Dictionary) -> Dictionary:
 	var personality = context.get("personality", {})
 	if typeof(personality) == TYPE_DICTIONARY:
@@ -177,6 +383,20 @@ func _run_build(context: Dictionary) -> Dictionary:
 	var run_build = context.get("run_build", {})
 	if typeof(run_build) == TYPE_DICTIONARY:
 		return run_build
+	return {}
+
+
+func _combat_stats(context: Dictionary) -> Dictionary:
+	var combat_stats = context.get("combat_stats", {})
+	if typeof(combat_stats) == TYPE_DICTIONARY:
+		return combat_stats
+	return {}
+
+
+func _needs(context: Dictionary) -> Dictionary:
+	var needs = context.get("needs", {})
+	if typeof(needs) == TYPE_DICTIONARY:
+		return needs
 	return {}
 
 
@@ -197,31 +417,6 @@ func _build_points(run_build: Dictionary, category: String) -> int:
 	if typeof(points) == TYPE_DICTIONARY:
 		return int(points.get(category, 0))
 	return int(run_build.get(category, 0))
-
-
-func _sticky_job(current_job: String, stone: int, wall_cost: int, aura_orb_cost: int, wall_count: int, aura_orb_count: int, desired_wall_count: int, desired_stone_reserve: int) -> String:
-	match current_job:
-		"mine_stone":
-			if stone < desired_stone_reserve + 2:
-				return "mine_stone"
-		"build_wall":
-			if wall_count < desired_wall_count and stone >= wall_cost:
-				return "build_wall"
-		"place_aura_orb":
-			if aura_orb_count < target_aura_orb_count and stone >= aura_orb_cost:
-				return "place_aura_orb"
-	return ""
-
-
-func _sticky_reason(job: String) -> String:
-	match job:
-		"mine_stone":
-			return "Sticking with stone plan"
-		"build_wall":
-			return "Sticking with wall plan"
-		"place_aura_orb":
-			return "Sticking with light plan"
-	return "Sticking with plan"
 
 
 func _job(name: String, reason: String) -> Dictionary:

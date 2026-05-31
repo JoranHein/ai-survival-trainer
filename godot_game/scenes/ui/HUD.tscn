@@ -1,25 +1,95 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/ui/HUD.gd" id="1_hud"]
+[ext_resource type="Script" path="res://scripts/ui/HUDMeterStrip.gd" id="2_meter"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud"]
+bg_color = Color(0.035, 0.045, 0.04, 0.82)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.28, 0.40, 0.34, 0.72)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
 
 [node name="HUD" type="CanvasLayer"]
 layer = 10
 script = ExtResource("1_hud")
 
-[node name="StatusLabel" type="Label" parent="."]
-unique_name_in_owner = true
+[node name="StatusPanel" type="PanelContainer" parent="."]
 anchors_preset = -1
-anchor_left = 0.0
-anchor_top = 0.0
-anchor_right = 0.0
-anchor_bottom = 0.0
-offset_left = 24.0
-offset_top = 20.0
-offset_right = 660.0
-offset_bottom = 470.0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 666.0
+offset_bottom = 204.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+
+[node name="Content" type="VBoxContainer" parent="StatusPanel"]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="StatusLabel" type="Label" parent="StatusPanel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.97, 1, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
 theme_override_constants/shadow_offset_x = 2
 theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 20
+theme_override_font_sizes/font_size = 16
 text = "Day: 1"
+autowrap_mode = 3
+
+[node name="MeterStrip" type="Control" parent="StatusPanel/Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(610, 32)
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("2_meter")
+
+[node name="MindLabel" type="Label" parent="StatusPanel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.93, 0.92, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 15
+text = "Ari: waiting"
+autowrap_mode = 3
+
+[node name="BuildLabel" type="Label" parent="StatusPanel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.88, 0.80, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 14
+text = "Build: OFF"
+autowrap_mode = 3
+
+[node name="PalettePanel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+anchors_preset = -1
+offset_left = 16.0
+offset_top = 210.0
+offset_right = 666.0
+offset_bottom = 256.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+
+[node name="BuildPalette" type="GridContainer" parent="PalettePanel"]
+unique_name_in_owner = true
+layout_mode = 2
+columns = 10
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 0

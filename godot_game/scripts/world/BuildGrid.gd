@@ -77,7 +77,7 @@ func _draw() -> void:
 	if is_cell_in_arena(preview_cell):
 		var fill_color := preview_color if can_afford else blocked_preview_color
 		var border_color := Color(0.9, 0.95, 0.9, 0.75) if can_afford else Color(1.0, 0.48, 0.42, 0.9)
-		if selected_build_type == "aura_orb":
+		if selected_build_type == "aura_orb" or selected_build_type == "bow_tower" or selected_build_type == "tar_pit" or selected_build_type == "fear_lantern" or selected_build_type == "decoy_idol" or selected_build_type == "thorn_totem" or selected_build_type == "repair_bench" or selected_build_type == "storm_rod":
 			var center := cell_to_world_center(preview_cell)
 			if preview_radius > 0.0:
 				draw_circle(center, preview_radius, Color(fill_color.r, fill_color.g, fill_color.b, 0.12))

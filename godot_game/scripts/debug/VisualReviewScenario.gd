@@ -13,12 +13,14 @@ const MOMENTS := [
 
 var world: Node
 var screenshot_capture: Node
+var upgrade_panel: Node
 var _running := false
 
 
-func setup(world_node: Node, capture_node: Node) -> void:
+func setup(world_node: Node, capture_node: Node, upgrade_panel_node: Node = null) -> void:
 	world = world_node
 	screenshot_capture = capture_node
+	upgrade_panel = upgrade_panel_node
 
 
 func start_sequence() -> void:
@@ -37,12 +39,19 @@ func _run_sequence() -> void:
 	for moment in MOMENTS:
 		if world == null or screenshot_capture == null:
 			break
+		_set_upgrade_panel_visible(moment == "morning_idle")
 		world.call("stage_visual_review_moment", moment)
 		await get_tree().process_frame
 		await get_tree().process_frame
 		var path: String = await screenshot_capture.capture(moment)
 		paths.append(path)
 
+	_set_upgrade_panel_visible(false)
 	_running = false
 	print("Visual review screenshots complete: ", paths)
 	scenario_finished.emit(paths)
+
+
+func _set_upgrade_panel_visible(visible: bool) -> void:
+	if upgrade_panel != null and upgrade_panel.has_method("set_open"):
+		upgrade_panel.call("set_open", visible)

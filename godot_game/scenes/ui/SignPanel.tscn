@@ -3,12 +3,12 @@
 [ext_resource type="Script" path="res://scripts/ui/SignPanel.gd" id="1_signpanel"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_display"]
-bg_color = Color(0.07, 0.08, 0.075, 0.88)
+bg_color = Color(0.045, 0.062, 0.062, 0.9)
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
-border_color = Color(0.38, 0.48, 0.42, 0.85)
+border_color = Color(0.50, 0.63, 0.50, 0.9)
 corner_radius_top_left = 6
 corner_radius_top_right = 6
 corner_radius_bottom_right = 6
@@ -45,42 +45,87 @@ anchor_right = 1.0
 offset_left = -424.0
 offset_top = 20.0
 offset_right = -24.0
-offset_bottom = 176.0
+offset_bottom = 224.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_display")
 
 [node name="DisplayVBox" type="VBoxContainer" parent="DisplayPanel"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 5
 
 [node name="TitleLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
 layout_mode = 2
-theme_override_colors/font_color = Color(0.85, 0.94, 0.86, 1)
+theme_override_colors/font_color = Color(0.91, 0.98, 0.84, 1)
 theme_override_font_sizes/font_size = 18
-text = "SIGN"
+text = "WHISPER SIGN"
 
 [node name="SignLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.96, 0.98, 0.94, 1)
-theme_override_font_sizes/font_size = 15
-text = "Sign: (empty)"
+theme_override_font_sizes/font_size = 14
+text = "The sign says:"
 autowrap_mode = 3
 
-[node name="InterpretationLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+[node name="ContextRow" type="HBoxContainer" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="AriContextLabel" type="Label" parent="DisplayPanel/DisplayVBox/ContextRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.76, 0.86, 0.84, 1)
+theme_override_font_sizes/font_size = 12
+text = "Ari: balanced"
+
+[node name="RunContextLabel" type="Label" parent="DisplayPanel/DisplayVBox/ContextRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.73, 0.82, 0.72, 1)
+theme_override_font_sizes/font_size = 12
+text = "Run: Balanced"
+horizontal_alignment = 2
+
+[node name="ReadingLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.84, 0.90, 0.92, 1)
-theme_override_font_sizes/font_size = 15
-text = "Ari reads: No sign yet."
+theme_override_font_sizes/font_size = 14
+text = "Reads: No sign yet."
 autowrap_mode = 3
 
-[node name="ConfusionLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+[node name="SignalSeparator" type="ColorRect" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 1)
+layout_mode = 2
+mouse_filter = 2
+color = Color(0.35, 0.48, 0.40, 0.72)
+
+[node name="SignalRow" type="HBoxContainer" parent="DisplayPanel/DisplayVBox"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(0.78, 0.84, 0.82, 1)
-theme_override_font_sizes/font_size = 14
-text = "Confusion: 100%"
+theme_override_constants/separation = 10
+
+[node name="SignalLabel" type="Label" parent="DisplayPanel/DisplayVBox/SignalRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.88, 0.74, 1)
+theme_override_font_sizes/font_size = 12
+text = "SIGNAL 0%"
+
+[node name="FooterSpacer" type="Control" parent="DisplayPanel/DisplayVBox/SignalRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ResonanceLabel" type="Label" parent="DisplayPanel/DisplayVBox/SignalRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.88, 0.96, 1)
+theme_override_font_sizes/font_size = 12
+text = "RESONANCE 0%"
 
 [node name="EditorPanel" type="PanelContainer" parent="."]
 unique_name_in_owner = true
@@ -89,9 +134,9 @@ anchors_preset = -1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -424.0
-offset_top = 188.0
+offset_top = 236.0
 offset_right = -24.0
-offset_bottom = 382.0
+offset_bottom = 430.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_editor")
 
 [node name="EditorVBox" type="VBoxContainer" parent="EditorPanel"]

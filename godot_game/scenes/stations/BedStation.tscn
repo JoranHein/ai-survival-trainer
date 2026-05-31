@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/stations/BedStation.gd" id="1_bed"]
+
+[node name="BedStation" type="Node2D"]
+script = ExtResource("1_bed")
+
+[node name="Nameplate" type="Label" parent="."]
+offset_left = -32.0
+offset_top = 24.0
+offset_right = 32.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(1, 0.88, 0.56, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.85)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 12
+text = "REST"
+horizontal_alignment = 1

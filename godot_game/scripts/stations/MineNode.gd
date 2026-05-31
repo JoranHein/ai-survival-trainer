@@ -7,6 +7,7 @@ extends Node2D
 
 var _progress := 0.0
 var _active := false
+var _pulse := 0.0
 
 
 func reset_run() -> void:
@@ -41,8 +42,22 @@ func get_progress_ratio() -> float:
 	return clampf(_progress / mine_interval_seconds, 0.0, 1.0)
 
 
+func get_activity_state() -> Dictionary:
+	return {
+		"kind": "mine",
+		"active": _active,
+		"progress": get_progress_ratio() if _active else 0.0,
+	}
+
+
 func _ready() -> void:
 	z_index = 1
+
+
+func _process(delta: float) -> void:
+	if _active:
+		_pulse = fmod(_pulse + maxf(delta, 0.0) * 3.6, 1000.0)
+		queue_redraw()
 
 
 func _draw() -> void:
@@ -57,3 +72,15 @@ func _draw() -> void:
 		var bar_position := Vector2(-width * 0.5, radius + 8.0)
 		draw_rect(Rect2(bar_position, Vector2(width, 5.0)), Color(0.08, 0.09, 0.08, 0.9), true)
 		draw_rect(Rect2(bar_position, Vector2(width * get_progress_ratio(), 5.0)), Color(0.84, 0.86, 0.72, 1.0), true)
+		_draw_mining_sparks()
+
+
+func _draw_mining_sparks() -> void:
+	var progress := get_progress_ratio()
+	var glow := 0.32 + sin(_pulse) * 0.10
+	draw_arc(Vector2.ZERO, radius + 7.0, -PI * 0.10, PI * 1.10, 32, Color(0.86, 0.82, 0.58, glow), 1.6)
+	for i in range(4):
+		var angle := _pulse + float(i) * PI * 0.5
+		var distance := radius * (0.62 + progress * 0.28)
+		var chip := Vector2(cos(angle), sin(angle)) * distance
+		draw_rect(Rect2(chip - Vector2(2.0, 2.0), Vector2(4.0, 4.0)), Color(0.88, 0.84, 0.62, 0.72), true)

@@ -49,9 +49,9 @@ func _damage_enemies(delta: float) -> void:
 
 func _draw() -> void:
 	var hp_ratio := hp / max_hp if max_hp > 0.0 else 0.0
-	var pulse_alpha := 0.10 + sin(_pulse) * 0.025
+	var pulse_alpha := 0.055 + sin(_pulse) * 0.018
 	draw_circle(Vector2.ZERO, aura_radius, Color(0.26, 0.72, 1.0, pulse_alpha))
-	draw_arc(Vector2.ZERO, aura_radius, 0.0, TAU, 64, Color(0.55, 0.90, 1.0, 0.55), 2.0)
+	draw_arc(Vector2.ZERO, aura_radius, 0.0, TAU, 64, Color(0.55, 0.90, 1.0, 0.42), 2.0)
 	draw_circle(Vector2.ZERO, 15.0, Color(0.16, 0.62, 0.96, 1.0))
 	draw_circle(Vector2.ZERO, 8.0, Color(0.78, 0.96, 1.0, 1.0))
 	draw_arc(Vector2.ZERO, 18.0, 0.0, TAU, 32, Color(0.85, 0.98, 1.0, 1.0), 2.0)

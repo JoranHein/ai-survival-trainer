@@ -28,4 +28,24 @@ func advance(delta: float, is_night: bool, ari_alive: bool) -> void:
 	_spawn_accumulator += maxf(delta, 0.0)
 	while _spawn_accumulator >= spawn_interval_seconds and _world.get_enemy_count() < max_enemies:
 		_spawn_accumulator -= spawn_interval_seconds
-		_world.spawn_zombie_at_edge()
+		if _world.has_method("spawn_enemy_at_edge"):
+			_world.spawn_enemy_at_edge(_choose_enemy_type())
+		else:
+			_world.spawn_zombie_at_edge()
+
+
+func _choose_enemy_type() -> String:
+	if _world == null:
+		return "zombie"
+	var day := 1
+	var day_night = _world.get("day_night")
+	if day_night != null:
+		day = int(day_night.get("day"))
+	var roll := randf()
+	if day >= 4 and roll < 0.12:
+		return "flying"
+	if day >= 3 and roll < 0.18:
+		return "brute"
+	if day >= 2 and roll < 0.38:
+		return "runner"
+	return "zombie"

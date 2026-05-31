@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/main/Main.gd" id="1_main"]
 [ext_resource type="PackedScene" path="res://scenes/world/World.tscn" id="2_world"]
@@ -6,6 +6,8 @@
 [ext_resource type="Script" path="res://scripts/debug/ScreenshotCapture.gd" id="4_capture"]
 [ext_resource type="Script" path="res://scripts/debug/VisualReviewScenario.gd" id="5_scenario"]
 [ext_resource type="PackedScene" path="res://scenes/ui/SignPanel.tscn" id="6_signpanel"]
+[ext_resource type="PackedScene" path="res://scenes/ui/MindLog.tscn" id="7_mindlog"]
+[ext_resource type="PackedScene" path="res://scenes/ui/UpgradePanel.tscn" id="8_upgrade"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
@@ -15,6 +17,10 @@ script = ExtResource("1_main")
 [node name="HUD" parent="." instance=ExtResource("3_hud")]
 
 [node name="SignPanel" parent="." instance=ExtResource("6_signpanel")]
+
+[node name="MindLog" parent="." instance=ExtResource("7_mindlog")]
+
+[node name="UpgradePanel" parent="." instance=ExtResource("8_upgrade")]
 
 [node name="ScreenshotCapture" type="Node" parent="."]
 script = ExtResource("4_capture")

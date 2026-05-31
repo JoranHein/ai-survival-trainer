@@ -1,10 +1,11 @@
 class_name ThoughtBubble
 extends Node2D
 
-@export var follow_offset := Vector2(0.0, -52.0)
+@export var follow_offset := Vector2(0.0, -128.0)
 @export var lifetime_seconds := 4.0
 @export var fade_seconds := 0.8
 @export var cooldown_seconds := 1.0
+@export var pointer_color := Color(0.90, 0.96, 1.0, 0.82)
 
 @onready var thought_label: Label = %ThoughtLabel
 
@@ -39,6 +40,7 @@ func show_thought(text: String, force := false) -> void:
 	visible = true
 	modulate.a = 1.0
 	_update_follow_position()
+	queue_redraw()
 
 
 func clear() -> void:
@@ -47,6 +49,7 @@ func clear() -> void:
 	_cooldown_left = 0.0
 	_last_text = ""
 	thought_label.text = ""
+	queue_redraw()
 
 
 func get_current_text() -> String:
@@ -62,6 +65,7 @@ func _process(delta: float) -> void:
 	_time_left -= delta
 	if _time_left <= 0.0:
 		visible = false
+		queue_redraw()
 		return
 
 	if fade_seconds > 0.0 and _time_left < fade_seconds:
@@ -71,3 +75,12 @@ func _process(delta: float) -> void:
 func _update_follow_position() -> void:
 	if is_instance_valid(_target):
 		global_position = _target.global_position + follow_offset
+		queue_redraw()
+
+
+func _draw() -> void:
+	if not visible or not is_instance_valid(_target):
+		return
+	var target_local := to_local(_target.global_position)
+	draw_line(Vector2(0.0, -8.0), target_local + Vector2(0.0, -14.0), pointer_color, 2.0)
+	draw_circle(target_local + Vector2(0.0, -14.0), 3.0, pointer_color)

@@ -13,6 +13,12 @@ const CATEGORIES := [
 	"fear_control",
 	"sign_faith",
 	"curiosity",
+	"farming",
+	"regeneration",
+	"trapcraft",
+	"bow",
+	"attack_range",
+	"thorns",
 ]
 
 var preset_id := "balanced"
@@ -41,6 +47,14 @@ func apply_preset_key(key_number: int) -> bool:
 			return apply_preset("fast_coward")
 		4:
 			return apply_preset("curious_sign_reader")
+		5:
+			return apply_preset("tower_archer")
+		6:
+			return apply_preset("thorn_tank")
+		7:
+			return apply_preset("trap_architect")
+		8:
+			return apply_preset("farmer_survivor")
 	return false
 
 
@@ -60,6 +74,9 @@ func get_context() -> Dictionary:
 	return {
 		"preset_id": preset_id,
 		"preset_name": preset_name,
+		"role": get_role(),
+		"tags": get_tags(),
+		"top_categories": get_top_categories(),
 		"total_points": TOTAL_POINTS,
 		"points": get_points(),
 	}
@@ -88,6 +105,77 @@ func get_summary() -> String:
 	return "%s | %s" % [preset_name, " ".join(parts)]
 
 
+func get_role() -> String:
+	var preset := _preset_data(preset_id)
+	var role := str(preset.get("role", "")).strip_edges()
+	if role != "":
+		return role
+	match preset_id:
+		"balanced":
+			return "Flexible prep"
+		"builder":
+			return "Fortify"
+		"aura_monk":
+			return "Ward focus"
+		"fast_coward":
+			return "Kite and calm"
+		"curious_sign_reader":
+			return "Sign reader"
+		"tower_archer":
+			return "Range plan"
+		"thorn_tank":
+			return "Endure contact"
+		"trap_architect":
+			return "Trap lanes"
+		"farmer_survivor":
+			return "Food recovery"
+	return _derived_role()
+
+
+func get_tags() -> Array:
+	var preset := _preset_data(preset_id)
+	var raw_tags = preset.get("tags", [])
+	var tags := []
+	if typeof(raw_tags) == TYPE_ARRAY:
+		for raw_tag in raw_tags:
+			var clean_tag := str(raw_tag).strip_edges()
+			if clean_tag == "":
+				continue
+			tags.append(_compact_text(clean_tag, 16))
+			if tags.size() >= 3:
+				break
+	if tags.size() >= 2:
+		return tags
+
+	for category in get_top_categories(3):
+		tags.append("%s %d" % [
+			str(category.get("label", "instinct")),
+			int(category.get("value", 0)),
+		])
+	while tags.size() < 2:
+		tags.append("mixed")
+	return tags
+
+
+func get_top_categories(limit := 3) -> Array:
+	var ranked := []
+	for category in CATEGORIES:
+		var value := get_value(category)
+		if value <= 0:
+			continue
+		ranked.append({
+			"id": category,
+			"label": _category_label(category),
+			"value": value,
+		})
+	ranked.sort_custom(_sort_top_category)
+
+	var result := []
+	for i in range(mini(limit, ranked.size())):
+		result.append(ranked[i])
+	return result
+
+
 func get_preset_name() -> String:
 	return preset_name
 
@@ -102,6 +190,16 @@ func get_effects() -> Dictionary:
 		"mining_speed_multiplier": 1.0 + get_value("mining") * 0.060,
 		"damage_taken_multiplier": maxf(0.72, 1.0 - get_value("defense") * 0.035),
 		"aura_damage_multiplier": 1.0 + get_value("warding") * 0.050,
+		"training_gain_multiplier": 1.0 + get_value("curiosity") * 0.015 + get_value("fear_control") * 0.015,
+		"defense_training_gain_multiplier": 1.0 + get_value("defense") * 0.080 + get_value("fear_control") * 0.040,
+		"farming_speed_multiplier": 1.0 + get_value("farming") * 0.070,
+		"rest_recovery_multiplier": 1.0 + get_value("regeneration") * 0.060 + get_value("fear_control") * 0.030,
+		"repair_speed_multiplier": 1.0 + get_value("building") * 0.045 + get_value("defense") * 0.035,
+		"bow_strength": get_strength("bow"),
+		"attack_range_strength": get_strength("attack_range"),
+		"trapcraft_strength": get_strength("trapcraft"),
+		"defense_strength": get_strength("defense"),
+		"thorns_strength": get_strength("thorns"),
 	}
 
 
@@ -186,7 +284,38 @@ func _category_label(category: String) -> String:
 			return "faith"
 		"curiosity":
 			return "curious"
+		"regeneration":
+			return "regen"
+		"attack_range":
+			return "range"
 	return category
+
+
+func _sort_top_category(a: Dictionary, b: Dictionary) -> bool:
+	var a_value := int(a.get("value", 0))
+	var b_value := int(b.get("value", 0))
+	if a_value == b_value:
+		return str(a.get("label", "")) < str(b.get("label", ""))
+	return a_value > b_value
+
+
+func _derived_role() -> String:
+	var top := get_top_categories(2)
+	if top.is_empty():
+		return "Unshaped"
+	if top.size() == 1:
+		return "%s focus" % str(top[0].get("label", "instinct")).capitalize()
+	return "%s + %s" % [
+		str(top[0].get("label", "instinct")).capitalize(),
+		str(top[1].get("label", "instinct")),
+	]
+
+
+func _compact_text(text: String, max_chars: int) -> String:
+	var clean_text := text.strip_edges()
+	if clean_text.length() <= max_chars:
+		return clean_text
+	return clean_text.substr(0, maxi(max_chars - 1, 1)).strip_edges() + "."
 
 
 func _fallback_presets() -> Dictionary:
@@ -231,5 +360,41 @@ func _fallback_presets() -> Dictionary:
 				"warding": 2,
 			},
 			"thought": "The sign is strange. I want to understand it.",
+		},
+		"tower_archer": {
+			"display_name": "Tower Archer",
+			"points": {
+				"bow": 5,
+				"attack_range": 4,
+				"building": 3,
+			},
+			"thought": "Distance can be a kind of wall.",
+		},
+		"thorn_tank": {
+			"display_name": "Thorn Tank",
+			"points": {
+				"thorns": 5,
+				"defense": 4,
+				"regeneration": 3,
+			},
+			"thought": "If they touch me, they should regret it.",
+		},
+		"trap_architect": {
+			"display_name": "Trap Architect",
+			"points": {
+				"trapcraft": 6,
+				"building": 3,
+				"warding": 3,
+			},
+			"thought": "The floor can fight before I have to.",
+		},
+		"farmer_survivor": {
+			"display_name": "Farmer Survivor",
+			"points": {
+				"farming": 6,
+				"regeneration": 3,
+				"fear_control": 3,
+			},
+			"thought": "A full stomach makes the dark smaller.",
 		},
 	}

@@ -1,0 +1,67 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/UpgradePanel.gd" id="1_upgrade"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_upgrade"]
+bg_color = Color(0.045, 0.046, 0.055, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.66, 0.56, 0.28, 0.9)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+
+[node name="UpgradePanel" type="CanvasLayer"]
+layer = 18
+script = ExtResource("1_upgrade")
+
+[node name="Panel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+anchors_preset = -1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -424.0
+offset_top = 330.0
+offset_right = -24.0
+offset_bottom = 624.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_upgrade")
+
+[node name="Content" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="TitleLabel" type="Label" parent="Panel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.93, 0.78, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 15
+text = "Permanent Upgrades"
+autowrap_mode = 3
+
+[node name="SummaryLabel" type="Label" parent="Panel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.86, 0.82, 0.66, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 12
+text = "TP 0  deaths 0  best day 1"
+autowrap_mode = 3
+
+[node name="UpgradeGrid" type="GridContainer" parent="Panel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+columns = 2
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 5

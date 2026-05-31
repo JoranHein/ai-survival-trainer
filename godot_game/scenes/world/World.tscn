@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=29 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/World.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/world/DayNightCycle.gd" id="2_daynight"]
@@ -15,6 +15,19 @@
 [ext_resource type="Script" path="res://scripts/ari/SignMind.gd" id="13_signmind"]
 [ext_resource type="Script" path="res://scripts/ari/Personality.gd" id="14_personality"]
 [ext_resource type="Script" path="res://scripts/ari/RunBuild.gd" id="15_runbuild"]
+[ext_resource type="PackedScene" path="res://scenes/stations/TrainingDummy.tscn" id="16_dummy"]
+[ext_resource type="PackedScene" path="res://scenes/stations/FarmPlot.tscn" id="17_farm"]
+[ext_resource type="PackedScene" path="res://scenes/stations/BedStation.tscn" id="18_bed"]
+[ext_resource type="PackedScene" path="res://scenes/stations/LibraryStation.tscn" id="19_library"]
+[ext_resource type="PackedScene" path="res://scenes/structures/SpikeTrap.tscn" id="20_trap"]
+[ext_resource type="PackedScene" path="res://scenes/structures/BowTower.tscn" id="21_tower"]
+[ext_resource type="Script" path="res://scripts/world/PermanentProgression.gd" id="22_progression"]
+[ext_resource type="PackedScene" path="res://scenes/structures/TarPit.tscn" id="23_tar"]
+[ext_resource type="PackedScene" path="res://scenes/structures/FearLantern.tscn" id="24_lantern"]
+[ext_resource type="PackedScene" path="res://scenes/structures/DecoyIdol.tscn" id="25_decoy"]
+[ext_resource type="PackedScene" path="res://scenes/structures/ThornTotem.tscn" id="26_thorn"]
+[ext_resource type="PackedScene" path="res://scenes/structures/RepairBench.tscn" id="27_repair"]
+[ext_resource type="PackedScene" path="res://scenes/structures/StormRod.tscn" id="28_storm"]
 
 [node name="World" type="Node2D"]
 script = ExtResource("1_world")
@@ -22,6 +35,14 @@ ari_scene = ExtResource("4_ari")
 zombie_scene = ExtResource("5_zombie")
 wall_scene = ExtResource("7_wall")
 aura_orb_scene = ExtResource("10_orb")
+spike_trap_scene = ExtResource("20_trap")
+bow_tower_scene = ExtResource("21_tower")
+tar_pit_scene = ExtResource("23_tar")
+fear_lantern_scene = ExtResource("24_lantern")
+decoy_idol_scene = ExtResource("25_decoy")
+thorn_totem_scene = ExtResource("26_thorn")
+repair_bench_scene = ExtResource("27_repair")
+storm_rod_scene = ExtResource("28_storm")
 
 [node name="ResourceSystem" type="Node" parent="."]
 script = ExtResource("8_resources")
@@ -44,7 +65,18 @@ script = ExtResource("14_personality")
 [node name="RunBuild" type="Node" parent="."]
 script = ExtResource("15_runbuild")
 
+[node name="PermanentProgression" type="Node" parent="."]
+script = ExtResource("22_progression")
+
 [node name="MineNode" parent="." instance=ExtResource("9_mine")]
+
+[node name="TrainingDummy" parent="." instance=ExtResource("16_dummy")]
+
+[node name="FarmPlot" parent="." instance=ExtResource("17_farm")]
+
+[node name="BedStation" parent="." instance=ExtResource("18_bed")]
+
+[node name="LibraryStation" parent="." instance=ExtResource("19_library")]
 
 [node name="BuildGrid" type="Node2D" parent="."]
 z_index = 90

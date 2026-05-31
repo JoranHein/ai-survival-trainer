@@ -8,11 +8,44 @@ const CONFIG_LOCAL_PATH := "res://data/ai_config.local.json"
 const CONFIG_EXAMPLE_PATH := "res://data/ai_config.example.json"
 
 const ENDPOINTS := {
+	"deep_interpretation": "/ai/deep-interpretation",
+	"fast_thought": "/ai/fast-thought",
 	"scribe": "/scribe",
 	"library_reflection": "/library-reflection",
 	"sleep_plan": "/sleep-plan",
 	"life_summary": "/life-summary",
 	"wisdom_synthesis": "/wisdom-synthesis",
+}
+
+const DEEP_PRIORITY_KEYS := [
+	"mine_stone",
+	"build_wall",
+	"wait_or_idle",
+	"use_existing_wall",
+	"wait_behind_wall",
+	"place_aura_orb",
+	"lure_to_aura",
+	"train_combat",
+	"farm_food",
+	"build_trap",
+	"build_tower",
+	"rest",
+	"reflect_library",
+	"repair",
+	"flee",
+	"fight",
+	"kite",
+	"hide",
+	"use_cover",
+]
+
+const LEGACY_PRIORITY_HINTS := {
+	"mining": "mine_stone",
+	"wall": "build_wall",
+	"aura_orb": "place_aura_orb",
+	"defensive_wait": "wait_or_idle",
+	"combat_training": "train_combat",
+	"repair_structure": "repair",
 }
 
 var config: Dictionary = {}
@@ -26,11 +59,60 @@ func get_provider_mode() -> String:
 	return str(config.get("provider_mode", PROVIDER_LOCAL_STUB))
 
 
+func is_ai_enabled() -> bool:
+	return bool(config.get("enabled", false)) and get_provider_mode() == PROVIDER_REMOTE_SERVER
+
+
+func set_ai_enabled(enabled: bool) -> void:
+	config["enabled"] = enabled
+	config["provider_mode"] = PROVIDER_REMOTE_SERVER if enabled else PROVIDER_LOCAL_STUB
+
+
+func get_ai_status() -> Dictionary:
+	return {
+		"enabled": is_ai_enabled(),
+		"provider_mode": get_provider_mode(),
+		"server_base_url": str(config.get("server_base_url", "")),
+		"timeout_seconds": float(config.get("timeout_seconds", 8.0)),
+	}
+
+
 func force_provider_mode(provider_mode: String) -> void:
 	if provider_mode == PROVIDER_REMOTE_SERVER:
 		config["provider_mode"] = PROVIDER_REMOTE_SERVER
+		config["enabled"] = true
 	else:
 		config["provider_mode"] = PROVIDER_LOCAL_STUB
+		config["enabled"] = false
+
+
+func request_deep_interpretation(payload: Dictionary, callback: Callable) -> void:
+	if not is_ai_enabled() or not is_inside_tree():
+		_call_callback_deferred(callback, _deep_fallback(payload, "local_fallback"))
+		return
+
+	var url := _configured_endpoint("deep_interpretation", "/ai/deep-interpretation")
+	if url == "":
+		_call_callback_deferred(callback, _deep_fallback(payload, "missing_endpoint"))
+		return
+
+	var http_request := HTTPRequest.new()
+	http_request.timeout = float(config.get("timeout_seconds", 8.0))
+	add_child(http_request)
+
+	var headers := _json_auth_headers()
+	var body := JSON.stringify(payload)
+
+	http_request.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
+		var response := _parse_deep_interpretation_response(payload, result, response_code, response_body)
+		_safe_call_callback(callback, response)
+		http_request.queue_free()
+	)
+
+	var err := http_request.request(url, headers, HTTPClient.METHOD_POST, body)
+	if err != OK:
+		http_request.queue_free()
+		_call_callback_deferred(callback, _deep_fallback(payload, "request_error"))
 
 
 func request_scribe(payload: Dictionary, callback: Callable) -> void:
@@ -54,7 +136,7 @@ func request_wisdom_synthesis(payload: Dictionary, callback: Callable) -> void:
 
 
 func request_health(callback: Callable) -> void:
-	if get_provider_mode() != PROVIDER_REMOTE_SERVER or not is_inside_tree():
+	if not is_ai_enabled() or not is_inside_tree():
 		_call_callback_deferred(callback, {
 			"ok": true,
 			"provider_mode": PROVIDER_LOCAL_STUB,
@@ -74,7 +156,7 @@ func request_health(callback: Callable) -> void:
 	var http_request := HTTPRequest.new()
 	http_request.timeout = float(config.get("timeout_seconds", 8.0))
 	add_child(http_request)
-	var headers := ["X-Ari-Key: " + str(config.get("api_key", ""))]
+	var headers := _auth_headers()
 
 	http_request.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
 		var parsed := _parse_json_dictionary(response_body.get_string_from_utf8())
@@ -119,10 +201,7 @@ func _request_ai(kind: String, payload: Dictionary, callback: Callable, enabled_
 	add_child(http_request)
 
 	var url := _join_url(server_base_url, endpoint)
-	var headers := [
-		"Content-Type: application/json",
-		"X-Ari-Key: " + str(config.get("api_key", "")),
-	]
+	var headers := _json_auth_headers()
 	var body := JSON.stringify({"payload": payload})
 
 	http_request.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
@@ -161,6 +240,18 @@ func _parse_remote_response(kind: String, payload: Dictionary, result: int, resp
 	return _validate_response(kind, parsed_raw, payload)
 
 
+func _parse_deep_interpretation_response(payload: Dictionary, result: int, response_code: int, body: PackedByteArray) -> Dictionary:
+	if result != HTTPRequest.RESULT_SUCCESS:
+		return _deep_fallback(payload, "request_failed")
+	if response_code < 200 or response_code >= 300:
+		return _deep_fallback(payload, "http_%d" % response_code)
+
+	var parsed := _parse_json_dictionary(body.get_string_from_utf8())
+	if parsed.is_empty():
+		return _deep_fallback(payload, "invalid_json")
+	return _validate_deep_interpretation(parsed, payload, true, "remote_server")
+
+
 func _load_config() -> void:
 	config = _default_config()
 	var config_path := ""
@@ -182,16 +273,22 @@ func _load_config() -> void:
 
 	for key in parsed.keys():
 		config[key] = parsed[key]
-	if str(config.get("provider_mode", PROVIDER_LOCAL_STUB)) != PROVIDER_REMOTE_SERVER:
+	if bool(config.get("enabled", false)):
+		config["provider_mode"] = PROVIDER_REMOTE_SERVER
+	elif str(config.get("provider_mode", PROVIDER_LOCAL_STUB)) != PROVIDER_REMOTE_SERVER:
 		config["provider_mode"] = PROVIDER_LOCAL_STUB
+		config["enabled"] = false
 
 
 func _default_config() -> Dictionary:
 	return {
+		"enabled": false,
 		"provider_mode": PROVIDER_LOCAL_STUB,
-		"server_base_url": "http://YOUR_SERVER_IP:8080",
-		"api_key": "PUT_SECRET_IN_LOCAL_CONFIG_ONLY",
-		"timeout_seconds": 8.0,
+		"server_base_url": "http://91.99.219.229:8088",
+		"deep_interpretation_url": "",
+		"fast_thought_url": "",
+		"api_key": "",
+		"timeout_seconds": 30.0,
 		"enable_scribe": true,
 		"enable_library_reflection": true,
 		"enable_sleep_plan": true,
@@ -208,6 +305,55 @@ func _parse_json_dictionary(text: String) -> Dictionary:
 	if typeof(json.data) != TYPE_DICTIONARY:
 		return {}
 	return json.data
+
+
+func _deep_fallback(payload: Dictionary, source := "local_fallback") -> Dictionary:
+	var local_fallback = payload.get("local_fallback", {})
+	var local: Dictionary = local_fallback if typeof(local_fallback) == TYPE_DICTIONARY else {}
+	var data := {
+		"interpretation": str(local.get("interpretation", "Ari falls back to his local reading.")),
+		"thought": "I only understand part of the sign. I will stay careful.",
+		"survival_theory": "local_fallback",
+		"priority_hints": local.get("priority_hints", {}),
+		"sign_strength": float(local.get("sign_strength", 0.0)),
+		"resonance": float(local.get("resonance", 0.0)),
+	}
+	return _validate_deep_interpretation(data, payload, false, source)
+
+
+func _validate_deep_interpretation(data: Dictionary, payload: Dictionary, ok := true, source := "remote_server") -> Dictionary:
+	var fallback = payload.get("local_fallback", {})
+	if typeof(fallback) != TYPE_DICTIONARY:
+		fallback = {}
+	var result := {
+		"ok": ok,
+		"provider_mode": get_provider_mode(),
+		"source": source,
+		"interpretation": _limit_text(str(data.get("interpretation", fallback.get("interpretation", ""))), 240),
+		"thought": _limit_text(str(data.get("thought", "")), 160),
+		"survival_theory": _limit_text(str(data.get("survival_theory", "fallback" if not ok else "")), 64),
+		"priority_hints": _deep_priority_hints(data.get("priority_hints", fallback.get("priority_hints", {}))),
+		"sign_strength": clampf(float(data.get("sign_strength", fallback.get("sign_strength", 0.0))), 0.0, 1.0),
+		"resonance": clampf(float(data.get("resonance", fallback.get("resonance", 0.0))), 0.0, 1.0),
+	}
+	if str(result["thought"]).strip_edges() == "":
+		result["thought"] = "I need to stay alive."
+	return result
+
+
+func _deep_priority_hints(value) -> Dictionary:
+	var result := {}
+	for key in DEEP_PRIORITY_KEYS:
+		result[str(key)] = 0.0
+	if typeof(value) != TYPE_DICTIONARY:
+		return result
+	for raw_key in value.keys():
+		var key := str(raw_key)
+		key = str(LEGACY_PRIORITY_HINTS.get(key, key))
+		if not result.has(key):
+			continue
+		result[key] = maxf(float(result[key]), clampf(float(value[raw_key]), 0.0, 1.0))
+	return result
 
 
 func _validated_fallback(kind: String, payload: Dictionary) -> Dictionary:
@@ -449,6 +595,30 @@ func _normalize_key(text: String) -> String:
 	normalized = normalized.replace(" ", "_")
 	normalized = normalized.replace("-", "_")
 	return normalized
+
+
+func _auth_headers() -> PackedStringArray:
+	var headers := PackedStringArray()
+	var api_key := str(config.get("api_key", "")).strip_edges()
+	if api_key != "":
+		headers.append("X-API-Key: " + api_key)
+	return headers
+
+
+func _json_auth_headers() -> PackedStringArray:
+	var headers := _auth_headers()
+	headers.append("Content-Type: application/json")
+	return headers
+
+
+func _configured_endpoint(kind: String, default_endpoint: String) -> String:
+	var explicit_url := str(config.get("%s_url" % kind, "")).strip_edges()
+	if explicit_url != "":
+		return explicit_url
+	var server_base_url := str(config.get("server_base_url", "")).strip_edges()
+	if server_base_url == "":
+		return ""
+	return _join_url(server_base_url, default_endpoint)
 
 
 func _join_url(server_base_url: String, endpoint: String) -> String:

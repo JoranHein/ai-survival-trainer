@@ -3,5 +3,6 @@
 /android/
 /data/ai_config.local.json
 /artifacts/screenshots/*.png
+/artifacts/screenshots/*.png.import
 /artifacts/reports/*.json
 /artifacts/reports/*.md

@@ -1,0 +1,62 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/MindLog.gd" id="1_mindlog"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_mindlog"]
+bg_color = Color(0.032, 0.038, 0.052, 0.88)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.42, 0.50, 0.66, 0.82)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
+
+[node name="MindLog" type="CanvasLayer"]
+layer = 12
+script = ExtResource("1_mindlog")
+
+[node name="LogPanel" type="PanelContainer" parent="."]
+anchors_preset = -1
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = -424.0
+offset_top = 230.0
+offset_right = -24.0
+offset_bottom = 324.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_mindlog")
+
+[node name="Content" type="VBoxContainer" parent="LogPanel"]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="TitleLabel" type="Label" parent="LogPanel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.82, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 12
+text = "ARI'S RECENT THOUGHTS"
+autowrap_mode = 3
+
+[node name="LinesLabel" type="Label" parent="LogPanel/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.93, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.75)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 11
+text = "No recent thought yet."
+autowrap_mode = 3

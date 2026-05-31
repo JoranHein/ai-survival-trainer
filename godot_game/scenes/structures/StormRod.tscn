@@ -1,0 +1,22 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/structures/StormRod.gd" id="1_storm"]
+
+[node name="StormRod" type="Node2D"]
+script = ExtResource("1_storm")
+max_hp = 30.0
+size = Vector2(28, 44)
+structure_type = "storm_rod"
+
+[node name="Nameplate" type="Label" parent="."]
+offset_left = -40.0
+offset_top = 38.0
+offset_right = 40.0
+offset_bottom = 54.0
+theme_override_colors/font_color = Color(0.66, 0.94, 1, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.85)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 12
+text = "STORM"
+horizontal_alignment = 1

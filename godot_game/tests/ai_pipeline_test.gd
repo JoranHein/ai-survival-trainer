@@ -24,6 +24,7 @@ func _run() -> void:
 	bridge.force_provider_mode("local_stub")
 
 	await _test_bridge_health_and_raw_validation(bridge)
+	_test_deep_interpretation_contract(bridge)
 	_test_memory_records_events()
 	_test_chronicle_validates_scribe_notes()
 	await _test_scribe_pipeline(bridge)
@@ -64,6 +65,56 @@ func _test_bridge_health_and_raw_validation(bridge: AIBridge) -> void:
 
 	await process_frame
 	_assert(health_state["done"], "health callback should run in local_stub mode")
+
+
+func _test_deep_interpretation_contract(bridge: AIBridge) -> void:
+	var long_interpretation := ""
+	var long_thought := ""
+	for _i in range(300):
+		long_interpretation += "x"
+	for _j in range(220):
+		long_thought += "y"
+
+	var payload := {
+		"local_fallback": {
+			"interpretation": "Fallback wall reading",
+			"priority_hints": {
+				"wall": 0.4,
+				"defensive_wait": 0.2,
+			},
+			"sign_strength": 0.3,
+			"resonance": 0.2,
+		},
+	}
+	var response := bridge._validate_deep_interpretation({
+		"interpretation": long_interpretation,
+		"thought": long_thought,
+		"survival_theory": "cover",
+		"priority_hints": {
+			"build_wall": 2.0,
+			"wait_behind_wall": "0.7",
+			"unknown_key": 1.0,
+		},
+		"sign_strength": -5.0,
+		"resonance": 2.0,
+	}, payload, true, "remote_server")
+
+	_assert(response.get("ok", false), "deep interpretation should report successful remote validation")
+	_assert(str(response.get("interpretation", "")).length() == 240, "deep interpretation text should be capped")
+	_assert(str(response.get("thought", "")).length() == 160, "deep thought text should be capped")
+	var hints: Dictionary = response.get("priority_hints", {})
+	_assert(hints.get("build_wall", 0.0) == 1.0, "deep build_wall hint should be clamped")
+	_assert(hints.get("wait_behind_wall", 0.0) == 0.7, "deep wait_behind_wall hint should accept numeric strings")
+	_assert(not hints.has("unknown_key"), "deep priority hints should remove unknown keys")
+	_assert(response.get("sign_strength", 1.0) == 0.0, "deep sign strength should clamp low values")
+	_assert(response.get("resonance", 0.0) == 1.0, "deep resonance should clamp high values")
+
+	var fallback := bridge._deep_fallback(payload, "disabled")
+	var fallback_hints: Dictionary = fallback.get("priority_hints", {})
+	_assert(not fallback.get("ok", true), "deep fallback should report unsuccessful remote use")
+	_assert(fallback.get("source", "") == "disabled", "deep fallback should preserve source")
+	_assert(fallback_hints.get("build_wall", 0.0) == 0.4, "deep fallback should translate local wall hint")
+	_assert(fallback_hints.get("wait_or_idle", 0.0) == 0.2, "deep fallback should translate local defensive wait hint")
 
 
 func _test_memory_records_events() -> void:

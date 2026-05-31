@@ -1,0 +1,5 @@
+tools/hetzner_connection.local.ps1
+ai_gateway/.env
+ai_gateway/.venv/
+__pycache__/
+*.py[cod]

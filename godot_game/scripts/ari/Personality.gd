@@ -5,7 +5,6 @@ const TRAIT_NAMES := [
 	"fearfulness",
 	"aggression",
 	"curiosity",
-	"perseverance",
 	"sign_faith",
 ]
 
@@ -34,7 +33,6 @@ func get_summary() -> String:
 	_append_label(labels, "fearfulness", "fearful", "brave")
 	_append_label(labels, "aggression", "aggressive", "low aggression")
 	_append_label(labels, "curiosity", "curious", "practical")
-	_append_label(labels, "perseverance", "stubborn", "flexible")
 	_append_label(labels, "sign_faith", "sign-faithful", "sign-doubtful")
 	if labels.is_empty():
 		labels.append("balanced")
@@ -59,9 +57,6 @@ func get_run_start_thought() -> String:
 		"curiosity":
 			if _trait("curiosity") >= 0.55:
 				return "The sign is strange. I want to understand it."
-		"perseverance":
-			if _trait("perseverance") >= 0.55:
-				return "If I choose a plan, I need to see it through."
 		"sign_faith":
 			if _trait("sign_faith") >= 0.55:
 				return "The sign matters. I need to listen closely."
