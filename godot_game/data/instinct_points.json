@@ -1,0 +1,69 @@
+{
+  "total_points": 12,
+  "categories": [
+    "mining",
+    "building",
+    "warding",
+    "movement",
+    "defense",
+    "fear_control",
+    "sign_faith",
+    "curiosity"
+  ],
+  "presets": {
+    "balanced": {
+      "display_name": "Balanced",
+      "points": {
+        "mining": 2,
+        "building": 2,
+        "warding": 2,
+        "movement": 2,
+        "defense": 1,
+        "fear_control": 1,
+        "sign_faith": 1,
+        "curiosity": 1
+      },
+      "thought": "A little of everything. I will have to listen carefully."
+    },
+    "builder": {
+      "display_name": "Builder",
+      "key": 1,
+      "points": {
+        "mining": 4,
+        "building": 5,
+        "warding": 3
+      },
+      "thought": "Stone and shape. That is how I will survive."
+    },
+    "aura_monk": {
+      "display_name": "Aura Monk",
+      "key": 2,
+      "points": {
+        "warding": 7,
+        "building": 3,
+        "fear_control": 2
+      },
+      "thought": "The circle may hurt them before I have to."
+    },
+    "fast_coward": {
+      "display_name": "Fast Coward",
+      "key": 3,
+      "points": {
+        "movement": 7,
+        "fear_control": 3,
+        "building": 2
+      },
+      "thought": "If I keep moving, maybe death misses."
+    },
+    "curious_sign_reader": {
+      "display_name": "Curious Sign Reader",
+      "key": 4,
+      "points": {
+        "curiosity": 5,
+        "sign_faith": 5,
+        "warding": 2
+      },
+      "thought": "The sign is strange. I want to understand it."
+    }
+  }
+}

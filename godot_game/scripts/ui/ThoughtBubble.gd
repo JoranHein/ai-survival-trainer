@@ -1,0 +1,73 @@
+class_name ThoughtBubble
+extends Node2D
+
+@export var follow_offset := Vector2(0.0, -52.0)
+@export var lifetime_seconds := 4.0
+@export var fade_seconds := 0.8
+@export var cooldown_seconds := 1.0
+
+@onready var thought_label: Label = %ThoughtLabel
+
+var _target: Node2D
+var _time_left := 0.0
+var _cooldown_left := 0.0
+var _last_text := ""
+
+
+func _ready() -> void:
+	visible = false
+
+
+func follow(target: Node2D) -> void:
+	_target = target
+	_update_follow_position()
+
+
+func show_thought(text: String, force := false) -> void:
+	var clean_text := text.strip_edges()
+	if clean_text == "":
+		return
+	if not force and _cooldown_left > 0.0:
+		return
+	if not force and visible and clean_text == _last_text:
+		return
+
+	_last_text = clean_text
+	thought_label.text = clean_text
+	_time_left = lifetime_seconds
+	_cooldown_left = cooldown_seconds
+	visible = true
+	modulate.a = 1.0
+	_update_follow_position()
+
+
+func clear() -> void:
+	visible = false
+	_time_left = 0.0
+	_cooldown_left = 0.0
+	_last_text = ""
+	thought_label.text = ""
+
+
+func get_current_text() -> String:
+	return _last_text if visible else ""
+
+
+func _process(delta: float) -> void:
+	_update_follow_position()
+	_cooldown_left = maxf(0.0, _cooldown_left - delta)
+	if not visible:
+		return
+
+	_time_left -= delta
+	if _time_left <= 0.0:
+		visible = false
+		return
+
+	if fade_seconds > 0.0 and _time_left < fade_seconds:
+		modulate.a = clampf(_time_left / fade_seconds, 0.0, 1.0)
+
+
+func _update_follow_position() -> void:
+	if is_instance_valid(_target):
+		global_position = _target.global_position + follow_offset

@@ -1,0 +1,126 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/SignPanel.gd" id="1_signpanel"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_display"]
+bg_color = Color(0.07, 0.08, 0.075, 0.88)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.38, 0.48, 0.42, 0.85)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_editor"]
+bg_color = Color(0.06, 0.07, 0.065, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.68, 0.76, 0.68, 0.95)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+
+[node name="SignPanel" type="CanvasLayer"]
+layer = 11
+script = ExtResource("1_signpanel")
+
+[node name="DisplayPanel" type="PanelContainer" parent="."]
+anchors_preset = -1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -424.0
+offset_top = 20.0
+offset_right = -24.0
+offset_bottom = 176.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_display")
+
+[node name="DisplayVBox" type="VBoxContainer" parent="DisplayPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.94, 0.86, 1)
+theme_override_font_sizes/font_size = 18
+text = "SIGN"
+
+[node name="SignLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.98, 0.94, 1)
+theme_override_font_sizes/font_size = 15
+text = "Sign: (empty)"
+autowrap_mode = 3
+
+[node name="InterpretationLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.84, 0.90, 0.92, 1)
+theme_override_font_sizes/font_size = 15
+text = "Ari reads: No sign yet."
+autowrap_mode = 3
+
+[node name="ConfusionLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.84, 0.82, 1)
+theme_override_font_sizes/font_size = 14
+text = "Confusion: 100%"
+
+[node name="EditorPanel" type="PanelContainer" parent="."]
+unique_name_in_owner = true
+visible = false
+anchors_preset = -1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -424.0
+offset_top = 188.0
+offset_right = -24.0
+offset_bottom = 382.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_editor")
+
+[node name="EditorVBox" type="VBoxContainer" parent="EditorPanel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="EditorTitleLabel" type="Label" parent="EditorPanel/EditorVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.94, 0.86, 1)
+theme_override_font_sizes/font_size = 18
+text = "WRITE SIGN"
+
+[node name="SignTextEdit" type="TextEdit" parent="EditorPanel/EditorVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(360, 96)
+theme_override_font_sizes/font_size = 16
+
+[node name="ButtonRow" type="HBoxContainer" parent="EditorPanel/EditorVBox"]
+layout_mode = 2
+alignment = 2
+theme_override_constants/separation = 8
+
+[node name="CommitButton" type="Button" parent="EditorPanel/EditorVBox/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Commit"
+
+[node name="CancelButton" type="Button" parent="EditorPanel/EditorVBox/ButtonRow"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Cancel"

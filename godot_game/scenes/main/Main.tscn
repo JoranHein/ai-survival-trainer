@@ -1,48 +1,23 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/main/Main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/world/World.tscn" id="2_world"]
+[ext_resource type="PackedScene" path="res://scenes/ui/HUD.tscn" id="3_hud"]
+[ext_resource type="Script" path="res://scripts/debug/ScreenshotCapture.gd" id="4_capture"]
+[ext_resource type="Script" path="res://scripts/debug/VisualReviewScenario.gd" id="5_scenario"]
+[ext_resource type="PackedScene" path="res://scenes/ui/SignPanel.tscn" id="6_signpanel"]
 
-[node name="Main" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+[node name="Main" type="Node"]
 script = ExtResource("1_main")
 
-[node name="SurvivalLabel" type="Label" parent="."]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.0
-anchor_top = 0.0
-anchor_right = 0.0
-anchor_bottom = 0.0
-offset_left = 24.0
-offset_top = 20.0
-offset_right = 690.0
-offset_bottom = 94.0
-theme_override_colors/font_color = Color(0.9, 0.96, 1, 1)
-theme_override_font_sizes/font_size = 18
-text = "Survival HUD"
-autowrap_mode = 3
+[node name="World" parent="." instance=ExtResource("2_world")]
 
-[node name="DebugLabel" type="Label" parent="."]
-unique_name_in_owner = true
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 1.0
-anchor_top = 0.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -420.0
-offset_top = 24.0
-offset_right = -24.0
-offset_bottom = -24.0
-grow_horizontal = 0
-grow_vertical = 2
-theme_override_colors/font_color = Color(0.9, 0.93, 0.88, 1)
-theme_override_font_sizes/font_size = 15
-text = "AI Pipeline Debug"
-autowrap_mode = 3
+[node name="HUD" parent="." instance=ExtResource("3_hud")]
+
+[node name="SignPanel" parent="." instance=ExtResource("6_signpanel")]
+
+[node name="ScreenshotCapture" type="Node" parent="."]
+script = ExtResource("4_capture")
+
+[node name="VisualReviewScenario" type="Node" parent="."]
+script = ExtResource("5_scenario")

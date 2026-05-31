@@ -1,0 +1,11 @@
+{
+  "materials": {
+    "crumbly_stone": {
+      "display_name": "Crumbly Stone",
+      "wall_hp": 40,
+      "wall_cost": {
+        "stone": 5
+      }
+    }
+  }
+}

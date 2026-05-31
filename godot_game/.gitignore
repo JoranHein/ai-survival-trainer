@@ -2,3 +2,6 @@
 .godot/
 /android/
 /data/ai_config.local.json
+/artifacts/screenshots/*.png
+/artifacts/reports/*.json
+/artifacts/reports/*.md
