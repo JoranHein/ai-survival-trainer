@@ -1,8 +1,8 @@
 class_name WaveDirector
 extends Node
 
-@export var spawn_interval_seconds := 3.0
-@export var max_enemies := 8
+@export var spawn_interval_seconds := 4.5
+@export var max_enemies := 6
 @export var enemy_data_path := "res://data/enemies.json"
 
 var _world: Node = null
@@ -104,7 +104,7 @@ func _wave_rule_for_day(day: int) -> Dictionary:
 func _default_wave_rules() -> Array:
 	return [
 		{"from_day": 1, "runner_chance": 0.0, "brute_chance": 0.0, "flying_chance": 0.0},
-		{"from_day": 2, "runner_chance": 0.25, "brute_chance": 0.0, "flying_chance": 0.0},
-		{"from_day": 3, "runner_chance": 0.28, "brute_chance": 0.12, "flying_chance": 0.0},
-		{"from_day": 5, "runner_chance": 0.34, "brute_chance": 0.18, "flying_chance": 0.12},
+		{"from_day": 2, "runner_chance": 0.20, "brute_chance": 0.0, "flying_chance": 0.0},
+		{"from_day": 3, "runner_chance": 0.25, "brute_chance": 0.10, "flying_chance": 0.0},
+		{"from_day": 6, "runner_chance": 0.32, "brute_chance": 0.18, "flying_chance": 0.10},
 	]

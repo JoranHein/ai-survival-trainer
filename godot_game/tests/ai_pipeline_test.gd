@@ -13,8 +13,12 @@ const WisdomSynthesizerScript = preload("res://scripts/ari/WisdomSynthesizer.gd"
 const AriControllerScript = preload("res://scripts/ari/AriController.gd")
 const AriMindScript = preload("res://scripts/ari/AriMind.gd")
 const SignMindScript = preload("res://scripts/ari/SignMind.gd")
+const RunBuildScript = preload("res://scripts/ari/RunBuild.gd")
 const EnemyControllerScript = preload("res://scripts/enemies/EnemyController.gd")
+const DayNightCycleScript = preload("res://scripts/world/DayNightCycle.gd")
 const WaveDirectorScript = preload("res://scripts/world/WaveDirector.gd")
+const ResourceSystemScript = preload("res://scripts/world/ResourceSystem.gd")
+const MineNodeScript = preload("res://scripts/stations/MineNode.gd")
 const WorldScript = preload("res://scripts/world/World.gd")
 const SignPanelScene = preload("res://scenes/ui/SignPanel.tscn")
 const HUDScene = preload("res://scenes/ui/HUD.tscn")
@@ -33,6 +37,7 @@ func _run() -> void:
 
 	await _test_bridge_health_and_raw_validation(bridge)
 	_test_deep_interpretation_contract(bridge)
+	await _test_no_random_trait_runtime_contract()
 	_test_ai_latency_cache_v1_contract(bridge)
 	await _test_world_ai_latency_commit_contract()
 	await _test_sign_panel_ai_status_line()
@@ -45,6 +50,9 @@ func _run() -> void:
 	_test_permanent_upgrades_v1_contract()
 	_test_enemy_variety_stats()
 	_test_wave_director_escalates_with_flying()
+	_test_day_night_balance_v1_targets()
+	await _test_day_night_balance_v1_multiday_simulation()
+	await _test_survival_strategy_expansion_v1_contract(bridge)
 	_test_ai_tactical_priority_jobs()
 	_test_memory_records_events()
 	_test_chronicle_validates_scribe_notes()
@@ -188,6 +196,43 @@ func _test_deep_interpretation_contract(bridge: AIBridge) -> void:
 	_assert(fallback_hints.get("build_wall", 0.0) == 0.4, "deep fallback should translate local wall hint")
 	_assert(fallback_hints.get("wait_or_idle", 0.0) == 0.2, "deep fallback should translate local defensive wait hint")
 	_assert(fallback_plan.size() > 0 and fallback_plan[0].get("affordance_id", "") == "build_wall", "deep fallback should expose a grounded plan from local hints")
+
+
+func _test_no_random_trait_runtime_contract() -> void:
+	var removed_state_key := "person" + "ality"
+	var removed_summary_key := removed_state_key + "_summary"
+	var removed_script_path := "res://scripts/ari/" + "Person" + "ality.gd"
+	var removed_node_name := "Person" + "ality"
+	_assert(not ResourceLoader.exists(removed_script_path), "Ari random trait script should be removed from the active game")
+	var sign_mind: SignMind = SignMindScript.new()
+	var neutral := sign_mind.interpret_sign("stand behind the wall")
+	var sign_faith_build := sign_mind.interpret_sign("stand behind the wall", {"points": {"sign_faith": 12}})
+	_assert(float(sign_faith_build.get("sign_strength", 0.0)) > float(neutral.get("sign_strength", 0.0)), "SignMind should treat its second argument as run_build")
+	sign_mind.free()
+
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should load without the removed trait resource")
+	if world_scene == null:
+		return
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	_assert(world.get_node_or_null(removed_node_name) == null, "World scene should not instantiate the removed trait node")
+	var seen_state := {"state": {}}
+	world.state_changed.connect(func(state: Dictionary) -> void:
+		seen_state["state"] = state
+	)
+	world.call("_emit_state")
+	await process_frame
+	var state = seen_state.get("state", {})
+	if typeof(state) == TYPE_DICTIONARY:
+		_assert(not state.has(removed_state_key), "World state should not expose removed random traits")
+		_assert(not state.has(removed_summary_key), "World state should not expose removed random trait summary")
+	var payload: Dictionary = world.call("_build_ai_deep_interpretation_payload")
+	var ari_payload = payload.get("ari", {})
+	if typeof(ari_payload) == TYPE_DICTIONARY:
+		_assert(not ari_payload.has(removed_state_key), "AIBridge deep payload should not send removed random traits")
+	world.queue_free()
 
 
 func _test_ai_latency_cache_v1_contract(bridge: AIBridge) -> void:
@@ -693,6 +738,191 @@ func _test_ai_tactical_priority_jobs() -> void:
 	ari_mind.free()
 
 
+func _test_survival_strategy_expansion_v1_contract(bridge: AIBridge) -> void:
+	for key in [
+		"fight_head_on",
+		"train_sword",
+		"smith_sword",
+		"mine_ore",
+		"build_forge",
+		"use_armor",
+		"rely_on_regen",
+		"regen_on_kill",
+		"stall_until_dawn",
+		"hide_until_dawn",
+		"avoid_killing",
+		"survive_until_morning",
+	]:
+		_assert(bridge.DEEP_PRIORITY_KEYS.has(key), "AIBridge should pass through %s priority hints" % key)
+
+	var bridge_response := bridge._validate_deep_interpretation({
+		"interpretation": "Ari reads the sign as a direct sword plan.",
+		"thought": "If I must kill them, I need a blade first.",
+		"survival_theory": "sword_killer",
+		"grounded_plan": [
+			{"affordance_id": "fight_head_on", "priority": 1.4, "reason": "The sign rejects hiding."},
+			{"affordance_id": "smith_sword", "priority": 0.8, "reason": "A better blade makes contact less desperate."},
+			{"affordance_id": "unknown_berserk", "priority": 1.0, "reason": "Unknown keys should not pass."},
+		],
+		"priority_hints": {
+			"fight_head_on": 1.2,
+			"train_sword": 0.7,
+			"smith_sword": 0.8,
+			"mine_ore": 0.5,
+			"regen_on_kill": 0.9,
+			"hide_until_dawn": -1.0,
+			"unknown_berserk": 1.0,
+		},
+		"sign_strength": 0.9,
+		"resonance": 0.8,
+	}, {"local_fallback": {}}, true, "remote_server")
+	var bridge_hints: Dictionary = bridge_response.get("priority_hints", {})
+	_assert(bridge_hints.get("fight_head_on", 0.0) == 1.0, "fight_head_on hint should clamp and pass through")
+	_assert(bridge_hints.get("smith_sword", 0.0) == 0.8, "smith_sword hint should pass through")
+	_assert(bridge_hints.get("regen_on_kill", 0.0) == 0.9, "regen_on_kill hint should pass through")
+	_assert(bridge_hints.get("hide_until_dawn", 1.0) == 0.0, "hide_until_dawn hint should clamp low values")
+	_assert(not bridge_hints.has("unknown_berserk"), "unknown sword hints should be ignored")
+
+	var resource_system: ResourceSystem = ResourceSystemScript.new()
+	resource_system.call("_ready")
+	_assert(resource_system.has_method("add_ore"), "ResourceSystem should track ore for smithing")
+	_assert(resource_system.has_method("get_ore"), "ResourceSystem should expose ore count")
+	if resource_system.has_method("add_ore") and resource_system.has_method("get_ore"):
+		resource_system.call("add_ore", 3)
+		_assert(int(resource_system.call("get_ore")) >= 3, "ore should be added to run resources")
+		_assert(bool(resource_system.call("can_afford", {"ore": 2})), "ore should participate in affordability checks")
+		_assert(bool(resource_system.call("spend", {"ore": 2})), "ore should be spendable")
+		_assert(int(resource_system.call("get_state").get("ore", 0)) >= 1, "resource state should include ore")
+	resource_system.free()
+
+	var mine_node: MineNode = MineNodeScript.new()
+	_assert(mine_node.has_method("mine_ore"), "MineNode should support an ore-focused mining job")
+	mine_node.free()
+
+	_assert(ResourceLoader.exists("res://data/weapons.json"), "weapons.json should define sword tiers")
+	var weapons := _load_json_file("res://data/weapons.json")
+	var sword_tiers: Dictionary = weapons.get("sword_tiers", {})
+	_assert(sword_tiers.has("crude_sword"), "weapons.json should include a crude sword tier")
+	_assert(sword_tiers.has("iron_sword"), "weapons.json should include an iron sword tier")
+
+	var run_build: RunBuild = RunBuildScript.new()
+	root.add_child(run_build)
+	await process_frame
+	_assert(bool(run_build.call("apply_preset_key", 9)), "run build key 9 should select Sword Killer")
+	_assert(str(run_build.call("get_preset_name")) == "Sword Killer", "Sword Killer preset should be named clearly")
+	var sword_effects: Dictionary = run_build.call("get_effects")
+	_assert(float(sword_effects.get("sword_strength", 0.0)) > 0.0, "Sword Killer should grant sword strength")
+	_assert(float(sword_effects.get("attack_damage_bonus", 0.0)) > 0.0, "Sword Killer should improve melee damage")
+	_assert(float(sword_effects.get("attack_speed_multiplier", 1.0)) > 1.0, "Sword Killer should improve melee attack speed")
+	root.remove_child(run_build)
+	run_build.queue_free()
+
+	var ari: AriController = AriControllerScript.new()
+	ari.call("apply_run_build_effects", {
+		"sword_strength": 0.8,
+		"attack_damage_bonus": 0.35,
+		"attack_speed_multiplier": 1.25,
+		"armor_bonus": 0.18,
+		"passive_regen_per_second": 0.2,
+		"regen_on_kill": 6.0,
+	})
+	var combat_stats: Dictionary = ari.call("get_combat_stats")
+	for stat_key in ["sword_skill", "attack_damage", "attack_speed", "armor", "passive_regen", "regen_on_kill", "sword_tier"]:
+		_assert(combat_stats.has(stat_key), "Ari combat stats should include %s" % stat_key)
+	_assert(ari.has_method("advance_sword_training_job"), "Ari should have a sword training job")
+	_assert(ari.has_method("restore_from_kill"), "Ari should be able to apply regen-on-kill")
+	ari.free()
+
+	var sign_mind: SignMind = SignMindScript.new()
+	var aggressive := sign_mind.interpret_sign("do not hide, focus on killing enemies")
+	var aggressive_hints: Dictionary = aggressive.get("priority_hints", {})
+	_assert(float(aggressive_hints.get("fight_head_on", 0.0)) >= 0.7, "aggressive signs should push fight_head_on")
+	_assert(float(aggressive_hints.get("train_sword", 0.0)) > 0.0, "aggressive signs should push sword training")
+	_assert(float(aggressive_hints.get("hide_until_dawn", 0.0)) <= 0.2, "do-not-hide signs should not push hiding")
+	var light_dead := sign_mind.interpret_sign("make the dead walk through light")
+	var light_dead_hints: Dictionary = light_dead.get("priority_hints", {})
+	_assert(float(light_dead_hints.get("aura_orb", 0.0)) > float(light_dead_hints.get("fight_head_on", 0.0)), "dead-through-light signs should stay aura-oriented instead of becoming melee intent")
+	var dawn_sign := sign_mind.interpret_sign("just survive until morning")
+	var dawn_hints: Dictionary = dawn_sign.get("priority_hints", {})
+	_assert(float(dawn_hints.get("stall_until_dawn", 0.0)) >= 0.7, "morning survival signs should push stall_until_dawn")
+	_assert(float(dawn_hints.get("survive_until_morning", 0.0)) >= 0.7, "morning survival signs should push survive_until_morning")
+	_assert(float(dawn_hints.get("avoid_killing", 0.0)) > 0.0, "morning survival signs should allow avoiding kills")
+	var sword_sign := sign_mind.interpret_sign("make a sword that gives you life when they die")
+	var sword_hints: Dictionary = sword_sign.get("priority_hints", {})
+	_assert(float(sword_hints.get("smith_sword", 0.0)) > 0.0, "sword crafting signs should push smith_sword")
+	_assert(float(sword_hints.get("regen_on_kill", 0.0)) > 0.0, "life-on-kill signs should push regen_on_kill")
+	sign_mind.free()
+
+	var ari_mind: AriMind = AriMindScript.new()
+	var mine_ore_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"ore": 0,
+		"sword_tier": 0,
+		"sword_next_ore_cost": 2,
+		"priority_hints": {"smith_sword": 0.9, "mine_ore": 0.8},
+		"run_build": {"points": {"sword": 5, "smithing": 4, "defense": 3}},
+	}))
+	_assert(mine_ore_decision.get("job", "") == "mine_ore", "smithing plans should mine ore before a sword upgrade")
+	var smith_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"ore": 3,
+		"sword_tier": 0,
+		"sword_next_ore_cost": 2,
+		"priority_hints": {"smith_sword": 0.9},
+		"run_build": {"points": {"sword": 5, "smithing": 4, "defense": 3}},
+	}))
+	_assert(smith_decision.get("job", "") == "smith_sword", "enough ore should let Ari smith a better sword")
+	var train_sword_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"ore": 3,
+		"sword_tier": 1,
+		"combat_stats": {"combat_level": 0.2, "sword_skill": 0.0},
+		"priority_hints": {"train_sword": 0.9},
+		"run_build": {"points": {"sword": 5, "defense": 3}},
+	}))
+	_assert(train_sword_decision.get("job", "") == "train_sword", "sword training hint should use the dummy for sword skill")
+	var night_fight_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 1,
+		"nearest_enemy_distance": 96.0,
+		"ari_hp_ratio": 0.9,
+		"combat_stats": {"combat_level": 1.0, "sword_skill": 1.2, "attack_damage": 18.0, "armor": 0.18},
+		"priority_hints": {"fight_head_on": 0.95},
+	}))
+	_assert(night_fight_decision.get("job", "") == "fight_head_on", "strong melee intent should allow head-on fighting at night")
+	var stall_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 2,
+		"nearest_enemy_distance": 130.0,
+		"ari_hp_ratio": 0.8,
+		"wall_count": 1,
+		"has_valid_cover": true,
+		"priority_hints": {"survive_until_morning": 0.95, "stall_until_dawn": 0.9, "avoid_killing": 0.8},
+	}))
+	_assert(["stall_until_dawn", "hide_until_dawn"].has(str(stall_decision.get("job", ""))), "morning survival intent should become an explicit stall/hide night tactic")
+	ari_mind.free()
+
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should load for survival strategy expansion checks")
+	if world_scene == null:
+		return
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	_assert(world.get("forge_station") != null, "World should expose a forge station")
+	_assert(world.has_method("_advance_ari_melee_job"), "World should advance a melee combat job")
+	_assert(world.has_method("_advance_ari_smithing_job"), "World should advance a smithing job")
+	_assert(world.has_method("_clear_enemies_for_dawn"), "World should clear enemies at dawn")
+	world.call("spawn_enemy_at_edge", "zombie")
+	await process_frame
+	_assert(int(world.call("get_enemy_count")) > 0, "World should spawn a test enemy before dawn")
+	world.call("_on_phase_changed", 2, "morning")
+	_assert(int(world.call("get_enemy_count")) == 0, "Dawn should despawn remaining night enemies")
+	_assert(str(world.get("status_message")).contains("Dawn") or str(world.get("latest_thought")).contains("Morning"), "Dawn despawn should be visible in status or thought")
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
+
+
 func _test_local_combat_signs() -> void:
 	var sign_mind: SignMind = SignMindScript.new()
 	for sign_text in [
@@ -857,13 +1087,13 @@ func _test_library_reflection_v1_contract() -> void:
 	_assert(safe_note.has("priority_hints"), "ReflectionSystem should preserve priority_hints")
 
 	var ari_mind: AriMind = AriMindScript.new()
-	var curious_reflect_decision := ari_mind.choose_daytime_job(_base_mind_context({
+	var research_reflect_decision := ari_mind.choose_daytime_job(_base_mind_context({
 		"wall_count": 2,
 		"meaningful_event_count": 1,
-		"personality": {"fearfulness": 0.25, "aggression": 0.2, "curiosity": 0.92},
+		"run_build": {"points": {"curiosity": 7}},
 		"needs": {"hunger": 24.0, "stamina": 90.0, "fear": 18.0},
 	}))
-	_assert(curious_reflect_decision.get("job", "") == "reflect_library", "curious Ari should reflect after a meaningful event when needs are stable")
+	_assert(research_reflect_decision.get("job", "") == "reflect_library", "research build should reflect after a meaningful event when needs are stable")
 	ari_mind.free()
 
 
@@ -986,8 +1216,97 @@ func _test_wave_director_escalates_with_flying() -> void:
 	_assert(director.call("choose_enemy_type_for_day", 1, 0.01) == "zombie", "day 1 should only spawn baseline zombies")
 	_assert(director.call("choose_enemy_type_for_day", 2, 0.10) == "runner", "day 2 should begin adding runners")
 	_assert(director.call("choose_enemy_type_for_day", 3, 0.05) == "brute", "day 3 should begin adding brutes")
-	_assert(director.call("choose_enemy_type_for_day", 5, 0.01) == "flying", "later nights should begin adding flying enemies")
+	_assert(director.call("choose_enemy_type_for_day", 5, 0.01) != "flying", "flying enemies should wait until Ari has seen several ground nights")
+	_assert(director.call("choose_enemy_type_for_day", 6, 0.01) == "flying", "later nights should begin adding flying enemies")
 	director.free()
+
+
+func _test_day_night_balance_v1_targets() -> void:
+	var cycle: DayNightCycle = DayNightCycleScript.new()
+	var prep_seconds := float(cycle.get("morning_seconds")) + float(cycle.get("midday_seconds")) + float(cycle.get("dusk_seconds"))
+	_assert(prep_seconds >= 76.0, "day preparation should be long enough for several meaningful tasks")
+	_assert(float(cycle.get("night_seconds")) >= 28.0, "night should last long enough to read whether defenses worked")
+	cycle.free()
+
+	var director: WaveDirector = WaveDirectorScript.new()
+	_assert(float(director.get("spawn_interval_seconds")) >= 3.5, "night spawns should be paced for readability")
+	_assert(int(director.get("max_enemies")) <= 7, "night enemy cap should keep early fights readable")
+	director.free()
+
+	var materials := _load_json_file("res://data/materials.json")
+	var stone_material: Dictionary = materials.get("materials", {}).get("crumbly_stone", {})
+	_assert(float(stone_material.get("wall_hp", 0.0)) >= 46.0, "basic walls should buy time without solving the night alone")
+
+	var structures := _load_json_file("res://data/structures.json")
+	var structure_defs: Dictionary = structures.get("structures", {})
+	var aura: Dictionary = structure_defs.get("aura_orb", {})
+	var tower: Dictionary = structure_defs.get("bow_tower", {})
+	_assert(float(aura.get("damage_per_second", 0.0)) <= 6.8, "aura should help without becoming an automatic kill field")
+	_assert(float(tower.get("damage", 0.0)) <= 9.0, "tower damage should be strong but not erase every ground enemy immediately")
+
+	var upgrades := _load_json_file("res://data/permanent_upgrades.json")
+	var upgrade_defs: Dictionary = upgrades.get("upgrades", {})
+	_assert(int(upgrade_defs.get("mining_efficiency", {}).get("base_cost", 0)) >= 3, "cheap permanent upgrades should still require a real survival run")
+	_assert(int(upgrade_defs.get("max_hp", {}).get("base_cost", 0)) >= 4, "core permanent upgrades should help without replacing sign understanding")
+
+	var ari: AriController = AriControllerScript.new()
+	var start_hunger := float(ari.get("hunger"))
+	ari.call("advance_survival_needs", 76.0, "midday")
+	_assert(float(ari.get("hunger")) - start_hunger <= 8.0, "one longer prep window should not make hunger dominate the loop")
+	ari.set("hp", 60.0)
+	ari.call("restore_from_rest", 5.0)
+	_assert(float(ari.get("hp")) >= 69.0, "short rest should be visibly useful after damage")
+	ari.free()
+
+
+func _test_day_night_balance_v1_multiday_simulation() -> void:
+	seed(55)
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should load for day/night balance simulation")
+	if world_scene == null:
+		return
+	var test_save_path := "user://permanent_upgrades_balance_test.json"
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	_isolate_balance_progression(world, test_save_path)
+	world.call("start_run")
+	await process_frame
+	var bridge: AIBridge = world.get("ai_bridge")
+	if bridge != null:
+		bridge.force_provider_mode("local_stub")
+	world.call("select_run_build_preset", 5, false)
+	world.call("commit_sign", "build walls, let arrows rain from a mountain, and make the dead walk through light")
+	var stats: Dictionary = await _simulate_balance_seconds(world, 420.0, 0.25)
+	print("Balance sim: day=%d phase=%s hp=%.1f hunger=%.1f food=%d stone=%d structures=%d enemies=%d max_wall=%d max_aura=%d max_tower=%d flying_seen=%s max_night_enemies=%d" % [
+		int(stats.get("day", 1)),
+		str(stats.get("phase", "")),
+		float(stats.get("hp", 0.0)),
+		float(stats.get("hunger", 0.0)),
+		int(stats.get("food", 0)),
+		int(stats.get("stone", 0)),
+		int(stats.get("structures", 0)),
+		int(stats.get("enemies", 0)),
+		int(stats.get("max_wall_count", 0)),
+		int(stats.get("max_aura_orb_count", 0)),
+		int(stats.get("max_bow_tower_count", 0)),
+		str(stats.get("flying_seen", false)),
+		int(stats.get("max_night_enemies", 0)),
+	])
+	_assert(bool(stats.get("alive", false)), "a coherent wall/light/tower sign should survive a four-day balance simulation")
+	_assert(int(stats.get("day", 1)) >= 5, "four-day simulation should reach the next morning")
+	_assert(int(stats.get("max_wall_count", 0)) >= 2, "Ari should build enough basic wall cover during a defensive run")
+	_assert(int(stats.get("max_aura_orb_count", 0)) >= 1, "Ari should make aura/light matter when the sign asks for it")
+	_assert(int(stats.get("max_bow_tower_count", 0)) >= 1, "Ari should make tower/ranged prep matter when the sign asks for it")
+	_assert(float(stats.get("hunger", 100.0)) < 85.0, "hunger should matter without dominating a competent four-day run")
+	_assert(not bool(stats.get("flying_seen", false)), "flying should not appear during the first four nights")
+	_assert(int(stats.get("max_night_enemies", 99)) <= 7, "night simulation should respect the readable enemy cap")
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
+	var absolute_save_path := ProjectSettings.globalize_path(test_save_path)
+	if FileAccess.file_exists(test_save_path):
+		DirAccess.remove_absolute(absolute_save_path)
 
 
 func _base_mind_context(overrides: Dictionary) -> Dictionary:
@@ -1025,13 +1344,95 @@ func _base_mind_context(overrides: Dictionary) -> Dictionary:
 		"lesson_count": 0,
 		"lesson_priority_bias": {},
 		"priority_hints": {},
-		"personality": {"fearfulness": 0.45, "aggression": 0.25, "curiosity": 0.5},
 		"run_build": {"points": {}},
 		"current_job": "wait_or_idle",
 	}
 	for key in overrides.keys():
 		context[key] = overrides[key]
 	return context
+
+
+func _load_json_file(path: String) -> Dictionary:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) == TYPE_DICTIONARY:
+		return parsed
+	return {}
+
+
+func _isolate_balance_progression(world: World, save_path: String) -> void:
+	var progression = world.get("permanent_progression")
+	if progression == null:
+		return
+	progression.set("save_path", save_path)
+	var zero_upgrades := {}
+	var state: Dictionary = progression.call("get_state")
+	for row in state.get("upgrade_rows", []):
+		if typeof(row) == TYPE_DICTIONARY:
+			zero_upgrades[str(row.get("id", ""))] = 0
+	progression.set("time_points", 0)
+	progression.set("deaths", 0)
+	progression.set("best_day", 1)
+	progression.set("upgrades", zero_upgrades)
+
+
+func _simulate_balance_seconds(world: World, seconds: float, step_seconds: float) -> Dictionary:
+	var elapsed := 0.0
+	var frame_count := 0
+	var max_night_enemies := 0
+	var max_wall_count := 0
+	var max_aura_orb_count := 0
+	var max_bow_tower_count := 0
+	var flying_seen := false
+	while elapsed < seconds:
+		var ari = world.get("ari")
+		if ari == null or not bool(ari.call("is_alive")):
+			break
+		var step := minf(step_seconds, seconds - elapsed)
+		world.call("_process", step)
+		for structure in world.call("get_structures"):
+			if is_instance_valid(structure) and structure.has_method("_process"):
+				structure.call("_process", step)
+		for enemy in world.call("get_enemies"):
+			if is_instance_valid(enemy) and enemy.has_method("_process"):
+				enemy.call("_process", step)
+		var day_night = world.get("day_night")
+		if day_night != null and bool(day_night.call("is_night")):
+			max_night_enemies = maxi(max_night_enemies, int(world.call("get_enemy_count")))
+		max_wall_count = maxi(max_wall_count, int(world.call("get_wall_count")))
+		max_aura_orb_count = maxi(max_aura_orb_count, int(world.call("get_aura_orb_count")))
+		max_bow_tower_count = maxi(max_bow_tower_count, int(world.call("get_bow_tower_count")))
+		var counts: Dictionary = world.call("get_enemy_type_counts")
+		flying_seen = flying_seen or int(counts.get("flying", 0)) > 0
+		elapsed += step
+		frame_count += 1
+		if frame_count % 120 == 0:
+			await process_frame
+	var ari = world.get("ari")
+	var needs: Dictionary = ari.call("get_needs") if ari != null else {}
+	var resource_system = world.get("resource_system")
+	var day_night = world.get("day_night")
+	return {
+		"alive": ari != null and bool(ari.call("is_alive")),
+		"hp": float(ari.get("hp")) if ari != null else 0.0,
+		"hunger": float(needs.get("hunger", 100.0)),
+		"day": int(day_night.get("day")) if day_night != null else 1,
+		"phase": str(day_night.get("phase")) if day_night != null else "",
+		"food": int(resource_system.call("get_food")) if resource_system != null else 0,
+		"stone": int(resource_system.call("get_stone")) if resource_system != null else 0,
+		"structures": int(world.call("get_structures").size()),
+		"wall_count": int(world.call("get_wall_count")),
+		"aura_orb_count": int(world.call("get_aura_orb_count")),
+		"bow_tower_count": int(world.call("get_bow_tower_count")),
+		"max_wall_count": max_wall_count,
+		"max_aura_orb_count": max_aura_orb_count,
+		"max_bow_tower_count": max_bow_tower_count,
+		"enemies": int(world.call("get_enemy_count")),
+		"flying_seen": flying_seen,
+		"max_night_enemies": max_night_enemies,
+	}
 
 
 func _test_memory_records_events() -> void:

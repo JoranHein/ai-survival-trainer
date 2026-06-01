@@ -45,7 +45,6 @@ func _test_sign_panel_keeps_long_readings_bounded(sign_panel: Node) -> void:
 	sign_panel.call("update_state", {
 		"sign_text": "build stone walls before night",
 		"sign_interpretation": "Ari reads stone and protection, then decides that walls matter more than anything else until the dark arrives and teeth start pressing against the outer edge.",
-		"personality_summary": "Ari: brave, practical, sign-faithful",
 		"run_build": {"preset_name": "Fast Coward", "role": "Kite and calm", "tags": ["move 7", "fear 3", "building 2"]},
 		"ai_survival_theory": "Use existing cover instead of adding stone.",
 		"ai_top_grounded_plan": "use_existing_wall: Keep the wall between Ari and teeth.",

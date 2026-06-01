@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.schemas import (
@@ -34,6 +36,18 @@ CURRENT_ACTION_KEYS = {
     "repair",
     "flee",
     "fight",
+    "fight_head_on",
+    "train_sword",
+    "smith_sword",
+    "mine_ore",
+    "build_forge",
+    "use_armor",
+    "rely_on_regen",
+    "regen_on_kill",
+    "stall_until_dawn",
+    "hide_until_dawn",
+    "avoid_killing",
+    "survive_until_morning",
     "kite",
     "hide",
     "build_storm_rod",
@@ -44,6 +58,24 @@ CURRENT_ACTION_KEYS = {
 
 def test_allowed_priority_keys_cover_current_action_vocabulary():
     assert CURRENT_ACTION_KEYS.issubset(ALLOWED_PRIORITY_KEYS)
+
+
+def test_gateway_request_contract_has_no_random_trait_state():
+    from pydantic import ValidationError
+
+    from app.schemas import AriState
+
+    removed_key = "person" + "ality"
+    former_fear_key = "fear" + "fulness"
+    former_combat_key = "ag" + "gression"
+    assert removed_key not in AriState.model_fields
+    with pytest.raises(ValidationError):
+        AriState(**{removed_key: {former_fear_key: 0.7}})
+
+    prompt = deep_user_prompt(_deep_request("stand behind the wall"))
+    assert removed_key not in prompt.lower()
+    assert former_fear_key not in prompt.lower()
+    assert former_combat_key not in prompt.lower()
 
 
 def test_sanitizes_deep_response_contract_without_confusion():
@@ -82,6 +114,12 @@ def test_sanitizes_deep_response_contract_without_confusion():
                 "build_storm_rod": 0.45,
                 "anti_flying": 1.5,
                 "sky_answer": "0.8",
+                "fight_head_on": 1.3,
+                "train_sword": 0.7,
+                "smith_sword": 0.6,
+                "mine_ore": 0.5,
+                "regen_on_kill": 0.8,
+                "survive_until_morning": 0.4,
                 "unknown": 1,
             },
             "sign_strength": -5,
@@ -135,6 +173,12 @@ def test_sanitizes_deep_response_contract_without_confusion():
     assert response["priority_hints"]["build_storm_rod"] == 0.8
     assert response["priority_hints"]["anti_flying"] == 1.0
     assert response["priority_hints"]["sky_answer"] == 0.8
+    assert response["priority_hints"]["fight_head_on"] == 1.0
+    assert response["priority_hints"]["train_sword"] == 0.7
+    assert response["priority_hints"]["smith_sword"] == 0.6
+    assert response["priority_hints"]["mine_ore"] == 0.5
+    assert response["priority_hints"]["regen_on_kill"] == 0.8
+    assert response["priority_hints"]["survive_until_morning"] == 0.4
     assert "unknown" not in response["priority_hints"]
     assert set(response["priority_hints"]) == ALLOWED_PRIORITY_KEYS
     assert response["sign_strength"] == 0.0
@@ -180,7 +224,6 @@ def _deep_request(sign_text: str) -> "DeepInterpretationRequest":
     return DeepInterpretationRequest(
         sign_text=sign_text,
         ari=AriState(
-            personality={"fearfulness": 0.7},
             run_build={"preset": "Builder"},
             hp=80,
             max_hp=100,
@@ -259,6 +302,9 @@ def test_deep_user_prompt_lists_current_tools_and_examples():
         "the moon hates cowards",
         "the wings do not fear stone",
         "my stomach is a second wall",
+        "do not hide, focus on killing enemies",
+        "just survive until morning",
+        "make a sword that gives you life when they die",
     ]:
         assert phrase in prompt
 
@@ -279,6 +325,17 @@ def test_deep_user_prompt_lists_current_tools_and_examples():
         "eat",
         "rest",
         "reflect_library",
+        "fight_head_on",
+        "train_sword",
+        "smith_sword",
+        "mine_ore",
+        "use_armor",
+        "rely_on_regen",
+        "regen_on_kill",
+        "stall_until_dawn",
+        "hide_until_dawn",
+        "avoid_killing",
+        "survive_until_morning",
     ]:
         assert key in prompt
 
@@ -293,6 +350,9 @@ def test_prompt_examples_prefer_semantic_affordance_mapping():
     assert "the circle should eat the dead => lure_to_aura/place_aura_orb" in prompt
     assert "the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover" in prompt
     assert "my stomach is a second wall => farm_food/eat_food/eat/rest, not wall" in prompt
+    assert "do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore" in prompt
+    assert "just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing" in prompt
+    assert "make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen" in prompt
     assert "Semantic cues for this sign: existing wall cover" in prompt
     assert "build_wall=0" in prompt
 

@@ -16,7 +16,7 @@
 			"label": "Max HP",
 			"role": "More life",
 			"tags": ["HP", "survive"],
-			"base_cost": 3,
+			"base_cost": 4,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 8.0
@@ -25,7 +25,7 @@
 			"label": "Base Damage",
 			"role": "Hit harder",
 			"tags": ["damage", "range"],
-			"base_cost": 3,
+			"base_cost": 4,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 0.04
@@ -34,7 +34,7 @@
 			"label": "Defense",
 			"role": "Take less",
 			"tags": ["armor", "survive"],
-			"base_cost": 3,
+			"base_cost": 4,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 0.025
@@ -43,7 +43,7 @@
 			"label": "Mining",
 			"role": "Stone faster",
 			"tags": ["stone", "day"],
-			"base_cost": 2,
+			"base_cost": 3,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 0.045
@@ -52,7 +52,7 @@
 			"label": "Building",
 			"role": "Cheaper builds",
 			"tags": ["walls", "cost"],
-			"base_cost": 3,
+			"base_cost": 4,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 0.025
@@ -61,7 +61,7 @@
 			"label": "Farming",
 			"role": "More food",
 			"tags": ["food", "calm"],
-			"base_cost": 2,
+			"base_cost": 3,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 0.055
@@ -70,7 +70,7 @@
 			"label": "Warding",
 			"role": "Stronger light",
 			"tags": ["orb", "area"],
-			"base_cost": 3,
+			"base_cost": 4,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 0.045
@@ -79,7 +79,7 @@
 			"label": "Recovery",
 			"role": "Recover faster",
 			"tags": ["rest", "heal"],
-			"base_cost": 3,
+			"base_cost": 4,
 			"cost_step": 2,
 			"max_level": 6,
 			"effect_per_level": 0.055
@@ -88,7 +88,7 @@
 			"label": "Small Steps",
 			"role": "Move slightly",
 			"tags": ["move", "small"],
-			"base_cost": 4,
+			"base_cost": 5,
 			"cost_step": 3,
 			"max_level": 6,
 			"effect_per_level": 0.015,
@@ -98,7 +98,7 @@
 			"label": "Sign Sense",
 			"role": "Read signs",
 			"tags": ["sign", "mind"],
-			"base_cost": 4,
+			"base_cost": 5,
 			"cost_step": 3,
 			"max_level": 6,
 			"effect_per_level": 0.035

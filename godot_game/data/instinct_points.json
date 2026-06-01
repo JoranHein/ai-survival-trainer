@@ -14,7 +14,12 @@
     "trapcraft",
     "bow",
     "attack_range",
-    "thorns"
+    "thorns",
+    "sword",
+    "attack_damage",
+    "attack_speed",
+    "armor",
+    "smithing"
   ],
   "presets": {
     "balanced": {
@@ -110,6 +115,48 @@
         "fear_control": 3
       },
       "thought": "A full stomach makes the dark smaller."
+    },
+    "sword_killer": {
+      "display_name": "Sword Killer",
+      "key": 9,
+      "points": {
+        "sword": 5,
+        "attack_damage": 3,
+        "attack_speed": 2,
+        "defense": 2
+      },
+      "thought": "If I have to touch the dead, I will make the touch count."
+    },
+    "heavy_armor_tank": {
+      "display_name": "Heavy Armor Tank",
+      "key": 10,
+      "points": {
+        "armor": 5,
+        "defense": 4,
+        "regeneration": 3
+      },
+      "thought": "If I cannot run, I must make my skin patient."
+    },
+    "dawn_survivor": {
+      "display_name": "Dawn Survivor",
+      "key": 11,
+      "points": {
+        "movement": 4,
+        "fear_control": 3,
+        "defense": 2,
+        "regeneration": 3
+      },
+      "thought": "I do not have to win the dark. I have to reach morning."
+    },
+    "smith": {
+      "display_name": "Smith",
+      "key": 12,
+      "points": {
+        "smithing": 5,
+        "mining": 4,
+        "sword": 3
+      },
+      "thought": "Ore can become an answer if I reach the forge."
     }
   }
 }

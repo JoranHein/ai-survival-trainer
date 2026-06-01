@@ -5,10 +5,10 @@
       "max_hp": 35.0,
       "speed": 70.0,
       "radius": 13.0,
-      "attack_damage": 10.0,
+      "attack_damage": 9.0,
       "attack_range": 24.0,
       "attack_cooldown_seconds": 1.0,
-      "structure_attack_damage": 8.0
+      "structure_attack_damage": 7.0
     },
     "runner": {
       "display_name": "Runner",
@@ -51,21 +51,21 @@
     },
     {
       "from_day": 2,
-      "runner_chance": 0.25,
+      "runner_chance": 0.2,
       "brute_chance": 0.0,
       "flying_chance": 0.0
     },
     {
       "from_day": 3,
-      "runner_chance": 0.28,
-      "brute_chance": 0.12,
+      "runner_chance": 0.25,
+      "brute_chance": 0.1,
       "flying_chance": 0.0
     },
     {
-      "from_day": 5,
-      "runner_chance": 0.34,
+      "from_day": 6,
+      "runner_chance": 0.32,
       "brute_chance": 0.18,
-      "flying_chance": 0.12
+      "flying_chance": 0.1
     }
   ]
 }

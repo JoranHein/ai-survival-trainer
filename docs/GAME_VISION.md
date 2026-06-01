@@ -10,7 +10,6 @@ The player is not issuing commands. The player is trying to communicate with a f
 
 Ari interprets signs through:
 
-- personality
 - fear
 - current danger
 - temporary run instincts
@@ -43,17 +42,16 @@ Example signs:
 ## Primary Loop
 
 1. New Ari is born.
-2. Ari gets a randomized personality.
-3. Player assigns 12 temporary instinct points for the run build.
-4. Player observes Ari and writes any freeform sign.
-5. Ari interprets the sign.
-6. Ari forms a survival theory.
-7. During the day Ari mines, farms, trains, researches, builds, repairs, rests, reflects, and prepares.
-8. At dusk the world darkens and Ari becomes more afraid.
-9. At night monsters come to kill him.
-10. Ari survives or dies.
-11. Death resets the run, but permanent upgrades remain.
-12. The player learns how Ari's mind worked and tries a better sign and build next time.
+2. Player assigns 12 temporary instinct points for the run build.
+3. Player observes Ari and writes any freeform sign.
+4. Ari interprets the sign.
+5. Ari forms a survival theory.
+6. During the day Ari mines, farms, trains, researches, builds, repairs, rests, reflects, and prepares.
+7. At dusk the world darkens and Ari becomes more afraid.
+8. At night monsters come to kill him.
+9. Ari survives or dies.
+10. Death resets the run, but permanent upgrades remain.
+11. The player learns how Ari's mind worked and tries a better sign and build next time.
 
 ## Pacing
 
@@ -80,7 +78,6 @@ Ari should have:
 - fear
 - hunger
 - stamina
-- personality traits
 - current action
 - memories and events
 - current sign interpretation

@@ -30,13 +30,13 @@ const STORM_ROD_BUILD_ID := "storm_rod"
 @export var repair_bench_scene: PackedScene
 @export var storm_rod_scene: PackedScene
 @export var enemy_data_path := "res://data/enemies.json"
+@export var weapons_data_path := "res://data/weapons.json"
 
 @onready var resource_system: Node = $ResourceSystem
 @onready var day_night: Node = $DayNightCycle
 @onready var wave_director: Node = $WaveDirector
 @onready var ari_mind: Node = $AriMind
 @onready var sign_mind: Node = $SignMind
-@onready var personality: Node = $Personality
 @onready var run_build: Node = $RunBuild
 @onready var permanent_progression: Node = $PermanentProgression
 @onready var build_grid: Node2D = $BuildGrid
@@ -45,6 +45,7 @@ const STORM_ROD_BUILD_ID := "storm_rod"
 @onready var farm_plot: Node2D = $FarmPlot
 @onready var bed_station: Node2D = $BedStation
 @onready var library_station: Node2D = $Library
+@onready var forge_station: Node2D = $ForgeStation
 @onready var thought_bubble: Node2D = $ThoughtBubble
 @onready var darkness_overlay: ColorRect = $DarknessOverlay
 
@@ -79,8 +80,6 @@ var ai_bridge: AIBridge
 var ai_status := "AI disabled"
 var ai_survival_theory := ""
 var ai_emotion := ""
-var personality_traits := {}
-var personality_summary := "Ari: balanced"
 var ari_memory := AriMemory.new()
 var lesson_book := LessonBook.new()
 var latest_lesson_title := ""
@@ -102,9 +101,18 @@ var _ari_ranged_cooldown := 0.0
 var _ari_ranged_flash_time := 0.0
 var _ari_ranged_flash_from := Vector2.ZERO
 var _ari_ranged_flash_to := Vector2.ZERO
+var _ari_melee_cooldown := 0.0
+var _ari_melee_flash_time := 0.0
+var _ari_melee_flash_from := Vector2.ZERO
+var _ari_melee_flash_to := Vector2.ZERO
+var _dawn_clear_flash_time := 0.0
 var _farming_yield_remainder := 0.0
 var _enemy_data := {}
 var _noticed_enemy_types := {}
+var _weapon_data := {}
+var _sword_order: Array[String] = []
+var _current_sword_id := "none"
+var _regen_on_kill_reported := false
 
 
 func _ready() -> void:
@@ -114,6 +122,7 @@ func _ready() -> void:
 	if permanent_progression.has_signal("changed"):
 		permanent_progression.connect("changed", Callable(self, "_on_permanent_progression_changed"))
 	_load_enemy_data()
+	_load_weapon_data()
 	wave_director.setup(self)
 	ai_bridge = AIBridge.new()
 	add_child(ai_bridge)
@@ -132,8 +141,11 @@ func _process(delta: float) -> void:
 	_position_farm_plot()
 	_position_bed_station()
 	_position_library_station()
+	_position_forge_station()
 	if ari != null:
 		ari.call("advance_survival_needs", delta, day_night.phase)
+		if ari.has_method("apply_passive_regen"):
+			ari.call("apply_passive_regen", delta)
 		_apply_structure_support_effects(delta)
 		_apply_passive_repairs(delta)
 		_update_survival_pressure_thoughts()
@@ -197,6 +209,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			select_run_build_preset(7)
 		elif event.keycode == KEY_8:
 			select_run_build_preset(8)
+		elif event.keycode == KEY_9:
+			select_run_build_preset(9)
+		elif event.keycode == KEY_0:
+			select_run_build_preset(10)
 	if event is InputEventMouseButton and event.pressed:
 		if build_mode and event.button_index == MOUSE_BUTTON_LEFT:
 			place_selected_structure_at(event.position)
@@ -212,6 +228,7 @@ func start_run() -> void:
 	farm_plot.call("reset_run")
 	bed_station.call("reset_run")
 	library_station.call("reset_run")
+	forge_station.call("reset_run")
 	if ari_memory.has_method("clear_life_memory"):
 		ari_memory.call("clear_life_memory")
 	else:
@@ -222,7 +239,12 @@ func start_run() -> void:
 	_reset_survival_pressure_flags()
 	_ari_ranged_cooldown = 0.0
 	_ari_ranged_flash_time = 0.0
+	_ari_melee_cooldown = 0.0
+	_ari_melee_flash_time = 0.0
+	_dawn_clear_flash_time = 0.0
 	_noticed_enemy_types = {}
+	_current_sword_id = "none"
+	_regen_on_kill_reported = false
 	_farming_yield_remainder = 0.0
 	status_message = ""
 	status_message_time = 0.0
@@ -238,9 +260,6 @@ func start_run() -> void:
 	if permanent_progression != null and permanent_progression.has_method("reset_run"):
 		permanent_progression.call("reset_run")
 	run_build.call("reset_run")
-	personality.call("randomize_for_run")
-	personality_traits = personality.call("get_traits")
-	personality_summary = str(personality.call("get_summary"))
 	_reinterpret_current_sign()
 	selected_build_type = WALL_BUILD_ID
 	day_night.restart()
@@ -254,11 +273,12 @@ func start_run() -> void:
 	_position_farm_plot()
 	_position_bed_station()
 	_position_library_station()
+	_position_forge_station()
 	_spawn_or_reset_ari()
+	_apply_current_sword_to_ari()
 	_apply_run_build_to_ari()
 	thought_bubble.call("clear")
 	set_build_mode(false, false)
-	_show_personality_start_thought(true)
 	_update_darkness_overlay()
 	_emit_state()
 	if sign_text.strip_edges() != "" and ai_bridge != null and ai_bridge.is_ai_enabled():
@@ -328,7 +348,7 @@ func stage_visual_review_moment(moment: String) -> void:
 			ai_emotion = "curious regret"
 			ai_status = "AI: active"
 			_stage_ari_needs(28.0, 88.0, 24.0)
-			day_night.advance(21.0)
+			day_night.advance(28.0)
 			_advance_debug_daytime(4.0)
 			_set_status_message("Library reflection staged.", 1.8)
 			_show_current_job_thought(true)
@@ -336,9 +356,9 @@ func stage_visual_review_moment(moment: String) -> void:
 			build_grid.call("set_selected_build_type", selected_build_type)
 			set_build_mode(false, false)
 		"dusk_darkening":
-			day_night.advance(57.5)
-		"night_zombies":
 			day_night.advance(68.0)
+		"night_zombies":
+			day_night.advance(82.0)
 			var arena := get_arena_rect()
 			resource_system.call("add_stone", 84)
 			_place_visual_review_defense_layout(arena)
@@ -379,7 +399,7 @@ func stage_visual_review_moment(moment: String) -> void:
 			_show_current_job_thought(true)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 999.0)
 		"ari_dead_or_damaged":
-			day_night.advance(68.0)
+			day_night.advance(82.0)
 			var arena := get_arena_rect()
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.82, arena.size.y * 0.42), "runner")
 			if ari != null:
@@ -691,6 +711,31 @@ func _load_enemy_data() -> void:
 		_enemy_data = enemies_data
 
 
+func _load_weapon_data() -> void:
+	_weapon_data = {
+		"sword_tiers": {
+			"none": {"display_name": "Hands", "tier": 0, "ore_cost": 0, "damage_bonus": 0.0, "armor_bonus": 0.0},
+			"crude_sword": {"display_name": "Crude Sword", "tier": 1, "ore_cost": 2, "damage_bonus": 5.0, "armor_bonus": 0.02},
+			"iron_sword": {"display_name": "Iron Sword", "tier": 2, "ore_cost": 5, "damage_bonus": 10.0, "armor_bonus": 0.06},
+		},
+	}
+	_sword_order = ["none", "crude_sword", "iron_sword"]
+	var file := FileAccess.open(weapons_data_path, FileAccess.READ)
+	if file == null:
+		return
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var tiers = parsed.get("sword_tiers", {})
+	if typeof(tiers) == TYPE_DICTIONARY:
+		_weapon_data["sword_tiers"] = tiers
+	var raw_order = parsed.get("sword_order", [])
+	if typeof(raw_order) == TYPE_ARRAY and raw_order.size() > 0:
+		_sword_order.clear()
+		for item in raw_order:
+			_sword_order.append(str(item))
+
+
 func _get_enemy_data(enemy_type: String) -> Dictionary:
 	if typeof(_enemy_data) != TYPE_DICTIONARY:
 		return {}
@@ -739,6 +784,31 @@ func clear_enemies() -> void:
 		if is_instance_valid(enemy):
 			enemy.queue_free()
 	enemies.clear()
+
+
+func _clear_enemies_for_dawn() -> void:
+	var cleared_count := enemies.size()
+	if cleared_count <= 0:
+		return
+	clear_enemies()
+	wave_director.restart()
+	_dawn_clear_flash_time = 1.2
+	ari_memory.record_event("dawn_enemies_vanished", {
+		"count": cleared_count,
+		"day": day_night.day,
+		"phase": "morning",
+	})
+	_set_status_message("Dawn broke: %d enemies vanished." % cleared_count, 2.2)
+	var current_job := str(ari.call("get_current_job")) if ari != null else ""
+	var survival_hint := maxf(
+		maxf(float(sign_priority_hints.get("survive_until_morning", 0.0)), float(sign_priority_hints.get("stall_until_dawn", 0.0))),
+		maxf(float(sign_priority_hints.get("hide_until_dawn", 0.0)), float(sign_priority_hints.get("avoid_killing", 0.0)))
+	)
+	if survival_hint > 0.2 or ["stall_until_dawn", "hide_until_dawn", "use_cover", "flee"].has(current_job):
+		_show_ari_thought("I only had to last until the light.", true)
+	else:
+		_show_ari_thought("Morning took them before they could finish me.", true)
+	queue_redraw()
 
 
 func clear_structures() -> void:
@@ -923,6 +993,9 @@ func _emit_state() -> void:
 		"lowest_structure_hp_ratio": _get_lowest_structure_hp_ratio(),
 		"stone": _stone_count(),
 		"food": _food_count(),
+		"ore": _ore_count(),
+		"sword_tier": _current_sword_tier(),
+		"sword_name": str(_current_sword_data().get("display_name", "Hands")),
 		"ari_hp_ratio": _get_ari_hp_ratio(),
 		"wall_cost": int(_get_wall_cost().get("stone", 0)),
 		"orb_cost": int(_get_aura_orb_cost().get("stone", 0)),
@@ -957,8 +1030,6 @@ func _emit_state() -> void:
 		"ai_emotion": ai_emotion,
 		"ai_top_hint": _get_top_priority_hint(sign_priority_hints),
 		"ai_top_grounded_plan": _get_top_grounded_plan_text(),
-		"personality": personality_traits,
-		"personality_summary": personality_summary,
 		"run_build": _get_run_build_context(),
 		"run_build_name": str(run_build.call("get_preset_name")) if run_build != null else "Balanced",
 		"run_build_summary": str(run_build.call("get_summary")) if run_build != null else "Balanced",
@@ -1045,6 +1116,7 @@ func _station_inspection_targets() -> Array:
 		{"node": farm_plot, "radius": 42.0, "text": "Inspect: Farm - grows food over time"},
 		{"node": bed_station, "radius": 42.0, "text": "Inspect: Rest - recovers and rereads notes"},
 		{"node": training_dummy, "radius": 38.0, "text": "Inspect: Dummy - trains combat stats"},
+		{"node": forge_station, "radius": 40.0, "text": "Inspect: Forge - turns ore into sword upgrades"},
 		{"node": library_station, "radius": 44.0, "text": "Inspect: Library - writes reflection notes"},
 	]
 
@@ -1062,6 +1134,8 @@ func _on_phase_changed(_day: int, _phase: String) -> void:
 		"day": _day,
 		"phase": _phase,
 	})
+	if _phase == "morning":
+		_clear_enemies_for_dawn()
 	if day_night.is_night() and ari != null:
 		ari.call("stop_daytime_job", "Night has started")
 		_show_current_job_thought(true)
@@ -1115,7 +1189,7 @@ func _on_ari_damaged(hp: float) -> void:
 
 
 func _on_ari_job_changed(job: String, reason: String) -> void:
-	var thought: String = str(ari_mind.call("thought_for_job", job, reason, personality_traits, _get_run_build_context()))
+	var thought: String = str(ari_mind.call("thought_for_job", job, reason, _get_run_build_context()))
 	if job == "rest":
 		var latest_note := _get_latest_lifetime_note()
 		if not latest_note.is_empty():
@@ -1273,11 +1347,18 @@ func record_structure_damaged(structure: Node, damage: float) -> void:
 
 func _on_enemy_died(enemy: Node) -> void:
 	enemies.erase(enemy)
+	var healed := 0.0
+	if ari != null and ari.has_method("restore_from_kill"):
+		healed = float(ari.call("restore_from_kill"))
 	ari_memory.record_event("enemy_killed", {
 		"enemy_type": str(enemy.get("enemy_type")) if enemy != null else "enemy",
+		"regen_healed": healed,
 		"day": day_night.day,
 		"phase": day_night.phase,
 	})
+	if healed > 0.0 and not _regen_on_kill_reported:
+		_regen_on_kill_reported = true
+		_show_ari_thought("The kill gave a little life back.", true)
 	_emit_state()
 
 
@@ -1323,6 +1404,8 @@ func _advance_ari_daytime(delta: float) -> void:
 		"mine_stone":
 			_set_ari_intent(_get_mining_spot(), "Mine")
 			ari.call("advance_mining_job", delta, true, reason)
+		"mine_ore":
+			_advance_ari_mine_ore_job(delta, reason)
 		"farm_food":
 			_set_ari_intent(_get_station_spot(farm_plot, "get_work_spot"), "Farm")
 			var produced := int(ari.call("advance_farming_job", delta, true, reason))
@@ -1368,12 +1451,23 @@ func _advance_ari_daytime(delta: float) -> void:
 		"train_combat":
 			_set_ari_intent(_get_station_spot(training_dummy, "get_training_spot"), "Train")
 			ari.call("advance_training_job", delta, true, reason)
+		"train_sword":
+			_set_ari_intent(_get_station_spot(training_dummy, "get_training_spot"), "Train")
+			ari.call("advance_sword_training_job", delta, true, reason)
+		"smith_sword":
+			_advance_ari_smithing_job(delta, reason)
+		"fight_head_on":
+			_advance_ari_melee_job(delta, reason)
+		"stall_until_dawn", "hide_until_dawn":
+			_advance_ari_stall_job(delta, job, reason)
 		"use_tower":
 			_advance_ari_tower_job(delta, reason)
 		"use_cover":
 			_advance_ari_cover_job(delta, reason)
 		"lure_to_aura":
 			_advance_ari_aura_lure_job(delta, reason)
+		"flee":
+			_advance_ari_flee_job(delta, reason)
 		_:
 			var wait_position := _get_defense_wait_position()
 			_set_ari_intent(wait_position, "Wait")
@@ -1396,12 +1490,80 @@ func _advance_ari_night_tactic(delta: float) -> void:
 			_advance_ari_cover_job(delta, reason)
 		"lure_to_aura":
 			_advance_ari_aura_lure_job(delta, reason)
+		"fight_head_on":
+			_advance_ari_melee_job(delta, reason)
+		"stall_until_dawn", "hide_until_dawn":
+			_advance_ari_stall_job(delta, job, reason)
 		"flee":
 			_advance_ari_flee_job(delta, reason)
 		_:
 			var wait_position := _get_defense_wait_position()
 			_set_ari_intent(wait_position, "Wait")
 			ari.call("wait_near", delta, wait_position, reason)
+
+
+func _advance_ari_mine_ore_job(delta: float, reason: String) -> void:
+	if mine_node == null or resource_system == null:
+		ari.call("stop_daytime_job", "Cannot mine ore now")
+		return
+	var target_position := _get_mining_spot()
+	_set_ari_intent(target_position, "Mine")
+	var arrived: bool = bool(ari.call("advance_move_job", delta, "mine_ore", reason, target_position, "mining ore"))
+	if arrived and mine_node.has_method("mine_ore"):
+		var multiplier := clampf(float(_get_run_build_effects().get("ore_yield_multiplier", 1.0)), 0.5, 3.0)
+		if bool(mine_node.call("mine_ore", delta * multiplier, resource_system)):
+			ari_memory.record_event("ore_mined", {"ore": _ore_count(), "day": day_night.day, "phase": day_night.phase})
+
+
+func _advance_ari_smithing_job(delta: float, reason: String) -> void:
+	if forge_station == null:
+		ari.call("stop_daytime_job", "No forge available")
+		return
+	var next_data := _next_sword_data()
+	if next_data.is_empty():
+		ari.call("stop_daytime_job", "Sword is already as good as this forge allows")
+		return
+	var ore_cost := maxi(int(next_data.get("ore_cost", 0)), 0)
+	if _ore_count() < ore_cost:
+		ari.call("stop_daytime_job", "Need ore for sword")
+		return
+	var target_position: Vector2 = forge_station.call("get_smith_spot") if forge_station.has_method("get_smith_spot") else forge_station.global_position
+	_set_ari_intent(target_position, "Forge")
+	var arrived: bool = bool(ari.call("advance_move_job", delta, "smith_sword", reason, target_position, "smithing"))
+	if not arrived or not forge_station.has_method("smith"):
+		return
+	var multiplier := clampf(float(_get_run_build_effects().get("smithing_speed_multiplier", 1.0)), 0.5, 3.0)
+	var completed := int(forge_station.call("smith", delta * multiplier))
+	if completed <= 0:
+		return
+	if not _spend_cost({"ore": ore_cost}):
+		ari.call("stop_daytime_job", "Need ore for sword")
+		return
+	_current_sword_id = _next_sword_id()
+	_apply_current_sword_to_ari()
+	ari_memory.record_event("sword_smithed", {
+		"sword": str(next_data.get("display_name", _current_sword_id)),
+		"tier": int(next_data.get("tier", 0)),
+		"day": day_night.day,
+		"phase": day_night.phase,
+	})
+	_set_status_message("%s forged. -%d ore." % [str(next_data.get("display_name", "Sword")), ore_cost], 2.0)
+	_show_ari_thought("The sword is heavier now. Maybe I can make contact cost them.", true)
+
+
+func _advance_ari_stall_job(delta: float, job: String, reason: String) -> void:
+	var cover := _find_cover_position()
+	if bool(cover.get("valid", false)):
+		var target_position: Vector2 = cover["position"]
+		_set_ari_intent(target_position, "Wait")
+		ari.call("advance_move_job", delta, job, reason, target_position, "stalling until dawn")
+		return
+	if _nearest_enemy_distance_from(ari.global_position) < 120.0:
+		_advance_ari_flee_job(delta, reason)
+		return
+	var wait_position := _get_defense_wait_position()
+	_set_ari_intent(wait_position, "Wait")
+	ari.call("advance_move_job", delta, job, reason, wait_position, "waiting for morning")
 
 
 func _advance_ari_build_job(delta: float, build_type: String, reason: String) -> void:
@@ -1487,6 +1649,49 @@ func _advance_ari_flee_job(delta: float, reason: String) -> void:
 	ari.call("advance_move_job", delta, "flee", reason, target_position, "fleeing")
 
 
+func _advance_ari_melee_job(delta: float, reason: String) -> void:
+	var target_enemy := get_nearest_enemy(ari.global_position if ari != null else _get_defense_anchor())
+	if target_enemy == null:
+		ari.call("stop_daytime_job", "No enemy close enough to fight")
+		return
+	if str(target_enemy.get("enemy_type")) == "flying":
+		_advance_ari_flee_job(delta, "A sword cannot answer wings")
+		return
+	var direction := target_enemy.global_position - ari.global_position
+	var distance := direction.length()
+	var target_position := target_enemy.global_position
+	if distance > 29.0 and direction.length() > 0.01:
+		target_position = target_enemy.global_position - direction.normalized() * 24.0
+	_set_ari_intent(target_position, "Fight")
+	var arrived: bool = bool(ari.call("advance_move_job", delta, "fight_head_on", reason, target_position, "fighting head on"))
+	if arrived:
+		_advance_ari_melee_attack(target_enemy)
+
+
+func _advance_ari_melee_attack(target_enemy: Node2D) -> void:
+	if _ari_melee_cooldown > 0.0 or ari == null or not _is_ari_alive():
+		return
+	if target_enemy == null or not is_instance_valid(target_enemy) or not target_enemy.has_method("take_damage"):
+		return
+	if ari.global_position.distance_to(target_enemy.global_position) > 36.0:
+		return
+	var origin := ari.global_position
+	var target_position := target_enemy.global_position
+	var damage := 8.0
+	if ari.has_method("get_melee_damage"):
+		damage = float(ari.call("get_melee_damage"))
+	target_enemy.call("take_damage", damage)
+	_ari_melee_cooldown = float(ari.call("get_melee_cooldown")) if ari.has_method("get_melee_cooldown") else 0.8
+	_ari_melee_flash_time = 0.26
+	_ari_melee_flash_from = origin
+	_ari_melee_flash_to = target_position
+	ari_memory.record_event("ari_melee_hit", {
+		"damage": damage,
+		"day": day_night.day,
+		"phase": day_night.phase,
+	})
+
+
 func _advance_ari_ranged_attack(_delta: float, tower: Node2D) -> void:
 	if _ari_ranged_cooldown > 0.0 or ari == null or not _is_ari_alive():
 		return
@@ -1526,6 +1731,10 @@ func _get_ari_mind_context() -> Dictionary:
 		"time_left": day_night.get_time_left(),
 		"night_close": day_night.phase == "dusk" and day_night.get_time_left() <= float(ari_mind.get("night_close_seconds")),
 		"stone": _stone_count(),
+		"ore": _ore_count(),
+		"sword_tier": _current_sword_tier(),
+		"sword_next_ore_cost": _next_sword_ore_cost(),
+		"sword_max_tier": maxi(_sword_order.size() - 1, 0),
 		"wall_cost": int(_get_wall_cost().get("stone", 0)),
 		"aura_orb_cost": int(_get_aura_orb_cost().get("stone", 0)),
 		"spike_trap_cost": int(_get_spike_trap_cost().get("stone", 0)),
@@ -1558,7 +1767,6 @@ func _get_ari_mind_context() -> Dictionary:
 		"lesson_priority_bias": _get_lesson_priority_bias(),
 		"priority_hints": sign_priority_hints,
 		"grounded_plan": sign_grounded_plan,
-		"personality": personality_traits,
 		"run_build": _get_run_build_context(),
 		"current_job": str(ari.call("get_current_job")) if ari != null else "wait_or_idle",
 	}
@@ -1640,7 +1848,67 @@ func _get_ari_combat_stats() -> Dictionary:
 		"accuracy_bonus": 0.0,
 		"damage_bonus": 0.0,
 		"defense_training": 0.0,
+		"sword_skill": 0.0,
+		"sword_tier": 0,
+		"attack_damage": 7.0,
+		"attack_speed": 1.0,
+		"armor": 0.0,
+		"passive_regen": 0.0,
+		"regen_on_kill": 0.0,
 	}
+
+
+func _current_sword_data() -> Dictionary:
+	return _sword_data(_current_sword_id)
+
+
+func _sword_data(sword_id: String) -> Dictionary:
+	var tiers = _weapon_data.get("sword_tiers", {})
+	if typeof(tiers) == TYPE_DICTIONARY:
+		var data = tiers.get(sword_id, {})
+		if typeof(data) == TYPE_DICTIONARY:
+			return data.duplicate(true)
+	return {}
+
+
+func _current_sword_tier() -> int:
+	return int(_current_sword_data().get("tier", 0))
+
+
+func _next_sword_id() -> String:
+	var index := _sword_order.find(_current_sword_id)
+	if index < 0:
+		index = 0
+	if index + 1 >= _sword_order.size():
+		return ""
+	return _sword_order[index + 1]
+
+
+func _next_sword_data() -> Dictionary:
+	var next_id := _next_sword_id()
+	if next_id == "":
+		return {}
+	return _sword_data(next_id)
+
+
+func _next_sword_ore_cost() -> int:
+	var next_data := _next_sword_data()
+	if next_data.is_empty():
+		return 0
+	return maxi(int(next_data.get("ore_cost", 0)), 0)
+
+
+func _apply_current_sword_to_ari() -> void:
+	if ari == null or not ari.has_method("set_sword_tier"):
+		return
+	var data := _current_sword_data()
+	ari.call(
+		"set_sword_tier",
+		int(data.get("tier", 0)),
+		str(data.get("display_name", "Hands")),
+		float(data.get("damage_bonus", 0.0)),
+		float(data.get("armor_bonus", 0.0))
+	)
 
 
 func _get_ari_hp_ratio() -> float:
@@ -1749,6 +2017,7 @@ func _apply_run_build_to_ari() -> void:
 	if ari == null or not ari.has_method("apply_run_build_effects"):
 		return
 	ari.call("apply_run_build_effects", _get_run_build_effects())
+	_apply_current_sword_to_ari()
 
 
 func _get_next_build_slot(build_type: String) -> Dictionary:
@@ -2539,6 +2808,12 @@ func _food_count() -> int:
 	return 0
 
 
+func _ore_count() -> int:
+	if resource_system != null and resource_system.has_method("get_ore"):
+		return int(resource_system.call("get_ore"))
+	return 0
+
+
 func _advance_ari_eat_job(reason: String) -> void:
 	if ari == null:
 		return
@@ -2588,6 +2863,13 @@ func _position_library_station() -> void:
 		return
 	var arena := get_arena_rect()
 	library_station.global_position = arena.get_center() + Vector2(326.0, -88.0)
+
+
+func _position_forge_station() -> void:
+	if forge_station == null:
+		return
+	var arena := get_arena_rect()
+	forge_station.global_position = arena.get_center() + Vector2(82.0, 92.0)
 
 
 func _create_library_note() -> void:
@@ -2663,8 +2945,15 @@ func _set_status_message(message: String, seconds := 2.0) -> void:
 func _update_ari_ranged_attack_timers(delta: float) -> void:
 	var safe_delta := maxf(delta, 0.0)
 	_ari_ranged_cooldown = maxf(0.0, _ari_ranged_cooldown - safe_delta)
+	_ari_melee_cooldown = maxf(0.0, _ari_melee_cooldown - safe_delta)
 	if _ari_ranged_flash_time > 0.0:
 		_ari_ranged_flash_time = maxf(0.0, _ari_ranged_flash_time - safe_delta)
+		queue_redraw()
+	if _ari_melee_flash_time > 0.0:
+		_ari_melee_flash_time = maxf(0.0, _ari_melee_flash_time - safe_delta)
+		queue_redraw()
+	if _dawn_clear_flash_time > 0.0:
+		_dawn_clear_flash_time = maxf(0.0, _dawn_clear_flash_time - safe_delta)
 		queue_redraw()
 
 
@@ -2681,7 +2970,7 @@ func _show_current_job_thought(force := false) -> void:
 		return
 	var job := str(ari.call("get_current_job"))
 	var reason := str(ari.call("get_job_reason"))
-	var thought: String = str(ari_mind.call("thought_for_job", job, reason, personality_traits, _get_run_build_context()))
+	var thought: String = str(ari_mind.call("thought_for_job", job, reason, _get_run_build_context()))
 	_show_ari_thought(thought, force)
 
 
@@ -2693,7 +2982,7 @@ func _show_sign_interpretation_thought(force := false) -> void:
 		"sign_strength": sign_strength,
 		"resonance": sign_resonance,
 	}
-	var thought: String = str(sign_mind.call("thought_for_interpretation", sign_text, interpretation, personality_traits, _get_run_build_context()))
+	var thought: String = str(sign_mind.call("thought_for_interpretation", sign_text, interpretation, _get_run_build_context()))
 	_show_ari_thought(thought, force)
 
 
@@ -2817,7 +3106,6 @@ func _build_ai_deep_interpretation_payload() -> Dictionary:
 	return {
 		"sign_text": sign_text,
 		"ari": {
-			"personality": personality_traits,
 			"run_build": _get_run_build_context(),
 			"hp": float(ari.get("hp")) if ari != null else 0.0,
 			"max_hp": float(ari.get("max_hp")) if ari != null else 0.0,
@@ -2831,8 +3119,13 @@ func _build_ai_deep_interpretation_payload() -> Dictionary:
 			"phase": day_night.phase,
 			"time_left": day_night.get_time_left(),
 			"stone": _stone_count(),
+			"food": _food_count(),
+			"ore": _ore_count(),
+			"sword_tier": _current_sword_tier(),
 			"wall_count": walls.size(),
 			"aura_orb_count": aura_orbs.size(),
+			"bow_tower_count": bow_towers.size(),
+			"storm_rod_count": storm_rods.size(),
 			"enemy_count": enemies.size(),
 			"enemy_type_counts": _get_enemy_type_counts(),
 			"known_enemy_types": _known_enemy_types(),
@@ -2855,12 +3148,16 @@ func _build_ai_deep_interpretation_payload() -> Dictionary:
 func _current_affordances() -> Array:
 	var stone := _stone_count()
 	var food := _food_count()
+	var ore := _ore_count()
 	var has_wall := walls.size() > 0
 	var has_aura := aura_orbs.size() > 0
 	var has_tower := bow_towers.size() > 0
+	var has_forge := forge_station != null
+	var next_sword_cost := _next_sword_ore_cost()
 	var damaged_count := _get_damaged_structure_count()
 	return [
 		_affordance("mine_stone", "Mine stone for structures and defenses.", true),
+		_affordance("mine_ore", "Mine low-tier ore for sword upgrades at the forge.", true),
 		_affordance("build_wall", "Spend stone to build a new wall block.", stone >= int(_get_wall_cost().get("stone", 0)), "not enough stone"),
 		_affordance("use_existing_wall", "Move near an existing wall so enemies must hit or go around it before reaching Ari.", has_wall, "no wall exists"),
 		_affordance("wait_behind_wall", "Wait on the safe side of an existing wall.", has_wall, "no wall exists"),
@@ -2868,7 +3165,14 @@ func _current_affordances() -> Array:
 		_affordance("place_aura_orb", "Spend stone to place an Aura Orb that damages enemies inside its circle.", stone >= int(_get_aura_orb_cost().get("stone", 0)), "not enough stone"),
 		_affordance("lure_to_aura", "Stand near the safe side of an Aura Orb so enemies pass through the damaging circle.", has_aura, "no Aura Orb exists"),
 		_affordance("train_combat", "Practice at the training dummy to improve combat readiness.", true),
+		_affordance("train_sword", "Practice sword handling at the training dummy.", true),
 		_affordance("prepare_weapon", "Prepare Ari for direct danger through combat training.", true),
+		_affordance("build_forge", "Forge station is already present in this prototype.", false, "forge already exists"),
+		_affordance("smith_sword", "Spend ore at the forge to improve Ari's sword tier.", has_forge and next_sword_cost > 0 and ore >= next_sword_cost, "need ore or max sword"),
+		_affordance("fight_head_on", "Use direct melee combat against ground enemies.", enemies.size() > 0, "no enemy to fight"),
+		_affordance("use_armor", "Lean on armor and defense stats when contact is unavoidable.", true),
+		_affordance("rely_on_regen", "Treat passive or kill recovery as support, not a direct command.", true),
+		_affordance("regen_on_kill", "Recover HP after kills if the current build supports it.", true),
 		_affordance("build_tower", "Spend stone to build a bow tower for height and ranged safety.", stone >= int(_get_bow_tower_cost().get("stone", 0)), "not enough stone"),
 		_affordance("use_tower", "Use an existing tower perch to keep distance from ground enemies.", has_tower, "no tower exists"),
 		_affordance("ranged_attack", "Attack from tower range when a tower and target exist.", has_tower, "no tower exists"),
@@ -2882,6 +3186,10 @@ func _current_affordances() -> Array:
 		_affordance("flee", "Move away from immediate danger.", true),
 		_affordance("kite", "Keep distance while danger approaches.", true),
 		_affordance("hide", "Stay near safer cover and avoid direct contact.", has_wall or has_aura or has_tower, "no safe place exists"),
+		_affordance("stall_until_dawn", "Delay and stay alive until sunrise clears the night pressure.", true),
+		_affordance("hide_until_dawn", "Use cover and distance to survive until dawn.", has_wall or has_aura or has_tower, "no safe place exists"),
+		_affordance("avoid_killing", "Avoid unnecessary direct kills when survival until morning is the goal.", true),
+		_affordance("survive_until_morning", "Prioritize lasting until dawn instead of clearing every enemy.", true),
 		_affordance("fight", "Accept direct combat if avoidance fails.", true),
 		_affordance("build_storm_rod", "Build a Storm Rod as an anti-flying sky defense.", stone >= int(_get_storm_rod_cost().get("stone", 0)), "not enough stone"),
 		_affordance("anti_flying", "Prioritize answers that work against flying enemies.", true),
@@ -2996,7 +3304,17 @@ func _job_matches_affordance(job: String, affordance_id: String) -> bool:
 		"eat", "eat_food":
 			return job == "eat_food" or job == "farm_food"
 		"prepare_weapon", "fight":
-			return job == "train_combat"
+			return job == "train_combat" or job == "fight_head_on" or job == "train_sword"
+		"fight_head_on":
+			return job == "fight_head_on"
+		"train_sword":
+			return job == "train_sword"
+		"smith_sword":
+			return job == "smith_sword" or job == "mine_ore"
+		"mine_ore":
+			return job == "mine_ore"
+		"stall_until_dawn", "hide_until_dawn", "survive_until_morning", "avoid_killing":
+			return job == "stall_until_dawn" or job == "hide_until_dawn" or job == "use_cover" or job == "flee"
 		"repair":
 			return job == "repair_structure"
 		"build_spike_trap":
@@ -3020,6 +3338,18 @@ func _affordance_label(affordance_id: String) -> String:
 			return "library"
 		"train_combat", "prepare_weapon", "fight":
 			return "combat"
+		"fight_head_on":
+			return "melee"
+		"train_sword":
+			return "sword training"
+		"smith_sword", "mine_ore":
+			return "sword forge"
+		"use_armor":
+			return "armor"
+		"rely_on_regen", "regen_on_kill":
+			return "regen"
+		"stall_until_dawn", "hide_until_dawn", "avoid_killing", "survive_until_morning":
+			return "dawn survival"
 		"build_spike_trap", "build_trap":
 			return "traps"
 	return affordance_id.replace("_", " ")
@@ -3049,7 +3379,19 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 	))
 	_set_hint_max(normalized, "combat_training", maxf(
 		maxf(float(normalized.get("train_combat", 0.0)), float(normalized.get("fight", 0.0))),
-		maxf(float(normalized.get("prepare_weapon", 0.0)), float(normalized.get("train_bow", 0.0)))
+		maxf(maxf(float(normalized.get("prepare_weapon", 0.0)), float(normalized.get("train_bow", 0.0))), float(normalized.get("train_sword", 0.0)))
+	))
+	_set_hint_max(normalized, "fight_head_on", maxf(
+		float(normalized.get("fight_head_on", 0.0)),
+		float(normalized.get("fight", 0.0)) * 0.65
+	))
+	_set_hint_max(normalized, "smith_sword", maxf(
+		float(normalized.get("smith_sword", 0.0)),
+		float(normalized.get("prepare_weapon", 0.0)) * 0.35
+	))
+	_set_hint_max(normalized, "mine_ore", maxf(
+		float(normalized.get("mine_ore", 0.0)),
+		float(normalized.get("smith_sword", 0.0)) * 0.55
 	))
 	_set_hint_max(normalized, "farm_food", maxf(
 		maxf(float(normalized.get("farm_food", 0.0)), float(normalized.get("eat", 0.0))),
@@ -3072,6 +3414,14 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 	_set_hint_max(normalized, "build_storm_rod", maxf(
 		float(normalized.get("build_storm_rod", 0.0)),
 		maxf(float(normalized.get("anti_flying", 0.0)), float(normalized.get("sky_answer", 0.0)))
+	))
+	_set_hint_max(normalized, "defensive_wait", maxf(
+		float(normalized.get("defensive_wait", 0.0)),
+		maxf(float(normalized.get("stall_until_dawn", 0.0)), float(normalized.get("hide_until_dawn", 0.0))) * 0.45
+	))
+	_set_hint_max(normalized, "hide", maxf(
+		float(normalized.get("hide", 0.0)),
+		float(normalized.get("hide_until_dawn", 0.0)) * 0.55
 	))
 	return normalized
 
@@ -3142,11 +3492,6 @@ func _structure_ai_status(structure: Node) -> String:
 	if ratio < 0.65:
 		return "damaged"
 	return "intact"
-
-
-func _show_personality_start_thought(force := false) -> void:
-	var thought: String = str(personality.call("get_run_start_thought"))
-	_show_ari_thought(thought, force)
 
 
 func _show_ari_thought(thought: String, force := false) -> void:
@@ -3231,7 +3576,7 @@ func _show_structure_destroyed_thought(structure_type: String) -> void:
 
 
 func _reinterpret_current_sign() -> void:
-	var interpretation: Dictionary = sign_mind.call("interpret_sign", sign_text, personality_traits, _get_run_build_context())
+	var interpretation: Dictionary = sign_mind.call("interpret_sign", sign_text, _get_run_build_context())
 	sign_interpretation = str(interpretation.get("interpretation_text", "Ari can read the words, but not a useful plan yet."))
 	ai_survival_theory = ""
 	ai_emotion = ""
@@ -3265,6 +3610,8 @@ func _draw() -> void:
 	_draw_defense_lanes(arena)
 	_draw_ari_intent()
 	_draw_ari_ranged_attack()
+	_draw_ari_melee_attack()
+	_draw_dawn_clear_flash(arena)
 	draw_rect(arena, Color(0.44, 0.50, 0.42, 1.0), false, 3.0)
 
 
@@ -3307,6 +3654,28 @@ func _draw_ari_ranged_attack() -> void:
 	draw_line(start, target, Color(1.0, 0.88, 0.34, 0.92 * alpha), 4.0)
 	draw_line(start, target, Color(0.38, 0.18, 0.04, 0.70 * alpha), 1.4)
 	draw_circle(target, 8.0 + alpha * 5.0, Color(1.0, 0.80, 0.28, 0.22 * alpha))
+
+
+func _draw_ari_melee_attack() -> void:
+	if _ari_melee_flash_time <= 0.0:
+		return
+	var alpha := clampf(_ari_melee_flash_time / 0.26, 0.0, 1.0)
+	var start := to_local(_ari_melee_flash_from)
+	var target := to_local(_ari_melee_flash_to)
+	var mid := start.lerp(target, 0.55)
+	var direction := (target - start).normalized() if start.distance_to(target) > 0.01 else Vector2.RIGHT
+	var side := Vector2(-direction.y, direction.x)
+	draw_line(start + side * 8.0, target - side * 8.0, Color(1.0, 0.78, 0.38, 0.86 * alpha), 4.0)
+	draw_arc(mid, 20.0, -0.45, 1.45, 18, Color(1.0, 0.42, 0.18, 0.60 * alpha), 3.0)
+	draw_circle(target, 7.0 + alpha * 4.0, Color(1.0, 0.32, 0.18, 0.22 * alpha))
+
+
+func _draw_dawn_clear_flash(arena: Rect2) -> void:
+	if _dawn_clear_flash_time <= 0.0:
+		return
+	var alpha := clampf(_dawn_clear_flash_time / 1.2, 0.0, 1.0)
+	draw_rect(arena, Color(1.0, 0.88, 0.52, 0.16 * alpha), true)
+	draw_line(Vector2(arena.position.x, arena.position.y + 18.0), Vector2(arena.end.x, arena.position.y + 18.0), Color(1.0, 0.92, 0.58, 0.42 * alpha), 3.0)
 
 
 func _draw_dashed_path(start: Vector2, target: Vector2, color: Color) -> void:
@@ -3368,6 +3737,13 @@ func _draw_intent_symbol(center: Vector2, color: Color) -> void:
 		"Train":
 			draw_line(center + Vector2(-8.0, 8.0), center + Vector2(8.0, -8.0), bright, 2.3)
 			draw_line(center + Vector2(-6.0, -4.0), center + Vector2(4.0, 6.0), color, 2.3)
+		"Forge":
+			draw_rect(Rect2(center + Vector2(-8.0, -5.0), Vector2(16.0, 10.0)), color.darkened(0.18), true)
+			draw_circle(center, 5.0, Color(1.0, 0.42, 0.16, 0.72))
+			draw_line(center + Vector2(-9.0, 8.0), center + Vector2(9.0, -8.0), bright, 2.0)
+		"Fight":
+			draw_line(center + Vector2(-8.0, 8.0), center + Vector2(8.0, -8.0), bright, 2.6)
+			draw_line(center + Vector2(-7.0, 2.0), center + Vector2(-2.0, 7.0), color, 2.1)
 		"Tower":
 			draw_rect(Rect2(center + Vector2(-7.0, -8.0), Vector2(14.0, 14.0)), color.darkened(0.12), true)
 			draw_line(center + Vector2(-6.0, 7.0), center + Vector2(0.0, -8.0), bright, 1.8)
@@ -3397,6 +3773,8 @@ func _intent_color(label: String) -> Color:
 			return Color(0.76, 0.66, 1.0, 0.78)
 		"Train":
 			return Color(1.0, 0.62, 0.25, 0.78)
+		"Forge", "Fight":
+			return Color(1.0, 0.46, 0.22, 0.78)
 		"Wait":
 			return Color(0.72, 0.82, 0.95, 0.72)
 		"Eat":

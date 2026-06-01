@@ -134,7 +134,6 @@ def _payload_for_sign(sign: str) -> dict[str, Any]:
     return {
         "sign_text": sign,
         "ari": {
-            "personality": {"fearfulness": 0.62, "aggression": 0.18, "curiosity": 0.48},
             "run_build": {"preset": "Balanced"},
             "hp": 100,
             "max_hp": 100,

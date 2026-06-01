@@ -29,6 +29,13 @@ var combat_level := 0.0
 var accuracy_bonus := 0.0
 var damage_bonus := 0.0
 var defense_training := 0.0
+var sword_skill := 0.0
+var sword_tier := 0
+var sword_tier_name := "Hands"
+var sword_damage_bonus := 0.0
+var armor := 0.0
+var passive_regen := 0.0
+var regen_on_kill := 0.0
 
 var _mine_node: Node2D
 var _resource_system: Node
@@ -44,6 +51,10 @@ var _training_gain_multiplier := 1.0
 var _defense_training_gain_multiplier := 1.0
 var _farming_speed_multiplier := 1.0
 var _rest_recovery_multiplier := 1.0
+var _sword_strength := 0.0
+var _attack_damage_bonus := 0.0
+var _attack_speed_multiplier := 1.0
+var _armor_bonus := 0.0
 var _damage_flash := 0.0
 var _action_pulse := 0.0
 
@@ -67,6 +78,13 @@ func reset_run() -> void:
 	accuracy_bonus = 0.0
 	damage_bonus = 0.0
 	defense_training = 0.0
+	sword_skill = 0.0
+	sword_tier = 0
+	sword_tier_name = "Hands"
+	sword_damage_bonus = 0.0
+	armor = 0.0
+	passive_regen = 0.0
+	regen_on_kill = 0.0
 	queue_redraw()
 
 
@@ -101,6 +119,13 @@ func apply_run_build_effects(effects: Dictionary) -> void:
 	_defense_training_gain_multiplier = clampf(float(effects.get("defense_training_gain_multiplier", 1.0)), 0.5, 2.0)
 	_farming_speed_multiplier = clampf(float(effects.get("farming_speed_multiplier", 1.0)), 0.5, 2.5)
 	_rest_recovery_multiplier = clampf(float(effects.get("rest_recovery_multiplier", 1.0)), 0.5, 2.5)
+	_sword_strength = clampf(float(effects.get("sword_strength", 0.0)), 0.0, 1.0)
+	_attack_damage_bonus = clampf(float(effects.get("attack_damage_bonus", 0.0)), 0.0, 1.5)
+	_attack_speed_multiplier = clampf(float(effects.get("attack_speed_multiplier", 1.0)), 0.5, 2.4)
+	_armor_bonus = clampf(float(effects.get("armor_bonus", 0.0)), 0.0, 0.55)
+	passive_regen = clampf(float(effects.get("passive_regen_per_second", 0.0)), 0.0, 2.0)
+	regen_on_kill = clampf(float(effects.get("regen_on_kill", 0.0)), 0.0, 18.0)
+	_update_combat_derived_stats()
 
 
 func _process(delta: float) -> void:
@@ -116,14 +141,14 @@ func advance_survival_needs(delta: float, phase: String) -> void:
 	if not is_alive():
 		return
 	var safe_delta := maxf(delta, 0.0)
-	var hunger_gain := 0.11
+	var hunger_gain := 0.10
 	if current_action.begins_with("moving"):
-		hunger_gain += 0.04
-	if current_action == "training combat" or current_action == "mining":
-		hunger_gain += 0.05
+		hunger_gain += 0.035
+	if current_action == "training combat" or current_action == "training sword" or current_action == "mining" or current_action == "mining ore" or current_action == "smithing" or current_action == "fighting head on":
+		hunger_gain += 0.045
 	hunger = minf(max_hunger, hunger + hunger_gain * safe_delta)
 
-	if current_action.begins_with("moving") or current_action == "training combat" or current_action == "mining":
+	if current_action.begins_with("moving") or current_action == "training combat" or current_action == "training sword" or current_action == "mining" or current_action == "mining ore" or current_action == "smithing" or current_action == "fighting head on":
 		stamina = maxf(0.0, stamina - 0.18 * safe_delta)
 	else:
 		stamina = minf(max_stamina, stamina + 0.10 * safe_delta)
@@ -194,6 +219,29 @@ func advance_training_job(delta: float, can_train: bool, reason: String) -> void
 		var completed_cycles := int(_training_dummy.call("train", delta * _training_gain_multiplier))
 		for _i in range(completed_cycles):
 			_apply_training_cycle()
+	queue_redraw()
+
+
+func advance_sword_training_job(delta: float, can_train: bool, reason: String) -> void:
+	_set_job("train_sword", reason)
+	if not is_alive():
+		stop_daytime_job("Dead")
+		return
+	if not can_train or _training_dummy == null:
+		stop_daytime_job("Cannot train sword now")
+		return
+
+	var training_spot: Vector2 = _training_dummy.call("get_training_spot")
+	var to_spot := training_spot - global_position
+	if to_spot.length() > training_arrive_distance:
+		current_action = "moving to sword training"
+		_training_dummy.call("set_active", false)
+		global_position += to_spot.normalized() * minf(move_speed * delta, to_spot.length())
+	else:
+		current_action = "training sword"
+		var completed_cycles := int(_training_dummy.call("train", delta * _training_gain_multiplier * (1.0 + _sword_strength * 0.30)))
+		for _i in range(completed_cycles):
+			_apply_sword_training_cycle()
 	queue_redraw()
 
 
@@ -308,6 +356,8 @@ func get_action_cue() -> Dictionary:
 		return _make_action_cue("mine", phase, Color(0.86, 0.82, 0.68, 1.0))
 	if action.find("train") >= 0 or action.find("combat") >= 0:
 		return _make_action_cue("train", phase, Color(1.0, 0.68, 0.28, 1.0))
+	if action.find("sword") >= 0 or action.find("fighting") >= 0:
+		return _make_action_cue("sword", phase, Color(1.0, 0.48, 0.24, 1.0))
 	if action.find("farm") >= 0:
 		return _make_action_cue("farm", phase, Color(0.48, 0.88, 0.36, 1.0))
 	if action.find("bed") >= 0 or action.find("rest") >= 0:
@@ -349,7 +399,8 @@ func take_damage(amount: float) -> void:
 	if not is_alive():
 		return
 	var trained_defense_multiplier := maxf(0.55, 1.0 - defense_training)
-	hp = maxf(0.0, hp - maxf(amount, 0.0) * _damage_taken_multiplier * trained_defense_multiplier)
+	var armor_multiplier := maxf(0.42, 1.0 - armor)
+	hp = maxf(0.0, hp - maxf(amount, 0.0) * _damage_taken_multiplier * trained_defense_multiplier * armor_multiplier)
 	fear = minf(max_fear, fear + 8.0)
 	_damage_flash = 0.18
 	damaged.emit(hp)
@@ -363,11 +414,20 @@ func is_alive() -> bool:
 
 
 func get_combat_stats() -> Dictionary:
+	_update_combat_derived_stats()
 	return {
 		"combat_level": combat_level,
 		"accuracy_bonus": accuracy_bonus,
 		"damage_bonus": damage_bonus,
 		"defense_training": defense_training,
+		"sword_skill": sword_skill,
+		"sword_tier": sword_tier,
+		"sword_tier_name": sword_tier_name,
+		"attack_damage": get_melee_damage(),
+		"attack_speed": get_attack_speed(),
+		"armor": armor,
+		"passive_regen": passive_regen,
+		"regen_on_kill": regen_on_kill,
 	}
 
 
@@ -391,11 +451,53 @@ func restore_from_food(food_power := 28.0) -> void:
 
 func restore_from_rest(delta: float) -> void:
 	var safe_delta := maxf(delta, 0.0)
-	hp = minf(max_hp, hp + 1.6 * safe_delta)
+	hp = minf(max_hp, hp + 1.8 * safe_delta)
 	stamina = minf(max_stamina, stamina + 2.6 * safe_delta)
 	fear = maxf(0.0, fear - 1.8 * safe_delta)
 	hunger = maxf(0.0, hunger - 0.04 * safe_delta)
 	queue_redraw()
+
+
+func apply_passive_regen(delta: float) -> float:
+	if not is_alive() or passive_regen <= 0.0 or hp >= max_hp:
+		return 0.0
+	var healed := minf(max_hp - hp, passive_regen * maxf(delta, 0.0))
+	hp += healed
+	if healed > 0.0:
+		queue_redraw()
+	return healed
+
+
+func restore_from_kill() -> float:
+	if not is_alive() or regen_on_kill <= 0.0:
+		return 0.0
+	var healed := minf(max_hp - hp, regen_on_kill)
+	hp += healed
+	fear = maxf(0.0, fear - minf(regen_on_kill * 0.20, 4.0))
+	if healed > 0.0:
+		queue_redraw()
+	return healed
+
+
+func set_sword_tier(next_tier: int, display_name: String, damage_bonus: float, armor_bonus := 0.0) -> void:
+	sword_tier = maxi(next_tier, 0)
+	sword_tier_name = display_name.strip_edges() if display_name.strip_edges() != "" else "Sword"
+	sword_damage_bonus = maxf(damage_bonus, 0.0)
+	_armor_bonus = maxf(_armor_bonus, maxf(armor_bonus, 0.0))
+	_update_combat_derived_stats()
+	queue_redraw()
+
+
+func get_melee_damage() -> float:
+	return maxf(1.0, 7.0 + sword_damage_bonus + sword_skill * 2.4 + combat_level * 1.2 + _attack_damage_bonus * 10.0 + _sword_strength * 3.0)
+
+
+func get_attack_speed() -> float:
+	return clampf(_attack_speed_multiplier * (1.0 + sword_skill * 0.035), 0.4, 3.0)
+
+
+func get_melee_cooldown() -> float:
+	return clampf(0.88 / get_attack_speed(), 0.22, 1.4)
 
 
 func soothe_fear(amount: float) -> void:
@@ -440,6 +542,19 @@ func _apply_training_cycle() -> void:
 	accuracy_bonus = clampf(accuracy_bonus + 0.010, 0.0, 0.30)
 	damage_bonus = clampf(damage_bonus + 0.014, 0.0, 0.40)
 	defense_training = clampf(defense_training + 0.014 * _defense_training_gain_multiplier, 0.0, 0.35)
+	_update_combat_derived_stats()
+
+
+func _apply_sword_training_cycle() -> void:
+	combat_level = clampf(combat_level + 0.08, 0.0, 5.0)
+	sword_skill = clampf(sword_skill + 0.16 + _sword_strength * 0.04, 0.0, 5.0)
+	damage_bonus = clampf(damage_bonus + 0.010, 0.0, 0.40)
+	defense_training = clampf(defense_training + 0.006 * _defense_training_gain_multiplier, 0.0, 0.35)
+	_update_combat_derived_stats()
+
+
+func _update_combat_derived_stats() -> void:
+	armor = clampf(defense_training * 0.35 + _armor_bonus, 0.0, 0.65)
 
 
 func _make_action_cue(kind: String, phase: String, color: Color) -> Dictionary:
@@ -476,6 +591,10 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, radius, body_color)
 	draw_circle(Vector2(5.0, -5.0), 3.4, Color(0.92, 0.99, 1.0, 1.0))
 	draw_arc(Vector2.ZERO, radius, 0.0, TAU, 36, outline_color, 3.0)
+	if armor > 0.03:
+		draw_arc(Vector2.ZERO, radius + 10.0, -PI * 0.25, PI * 1.25, 32, Color(0.78, 0.86, 0.88, 0.24 + armor * 0.55), 2.4)
+	if sword_tier > 0:
+		draw_line(Vector2(radius * 0.45, radius * 0.50), Vector2(radius + 8.0, -radius * 0.40), Color(0.94, 0.80, 0.56, 0.86), 2.1)
 	if _damage_flash > 0.0:
 		draw_arc(Vector2.ZERO, radius + 10.0, -PI * 0.20, PI * 1.20, 32, Color(1.0, 0.44, 0.28, 0.72), 3.0)
 	if not is_alive():
@@ -560,6 +679,10 @@ func _draw_action_symbol(kind: String, center: Vector2, color: Color) -> void:
 				center + Vector2(13.0, 0.0),
 				center + Vector2(7.0, 4.0),
 			]), color)
+		"sword":
+			draw_line(center + Vector2(-6.0, 6.0), center + Vector2(7.0, -7.0), bright, 2.4)
+			draw_line(center + Vector2(-7.0, 2.0), center + Vector2(-2.0, 7.0), color, 2.0)
+			draw_circle(center + Vector2(7.0, -7.0), 1.6, bright)
 		"wait":
 			draw_colored_polygon(PackedVector2Array([
 				center + Vector2(0.0, -7.0),

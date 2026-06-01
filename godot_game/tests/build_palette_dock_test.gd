@@ -75,7 +75,6 @@ func _build_mode_state() -> Dictionary:
 		"repair_bench_cost": 6,
 		"storm_rod_cost": 7,
 		"needs": {"hunger": 45.0, "fear": 57.0, "stamina": 37.0},
-		"personality_summary": "Ari: brave",
 		"run_build": {"preset_name": "Fast Coward", "tags": ["move 7"]},
 		"ari_action": "resting",
 		"ari_job_reason": "Need calm before night",

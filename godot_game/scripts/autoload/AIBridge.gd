@@ -51,6 +51,18 @@ const DEEP_PRIORITY_KEYS := [
 	"repair_structure",
 	"flee",
 	"fight",
+	"fight_head_on",
+	"train_sword",
+	"smith_sword",
+	"mine_ore",
+	"build_forge",
+	"use_armor",
+	"rely_on_regen",
+	"regen_on_kill",
+	"stall_until_dawn",
+	"hide_until_dawn",
+	"avoid_killing",
+	"survive_until_morning",
 	"kite",
 	"hide",
 	"build_storm_rod",
@@ -346,6 +358,8 @@ func _deep_context_signature(payload: Dictionary) -> String:
 		"enemy_count",
 		"food",
 		"stone",
+		"ore",
+		"sword_tier",
 	]:
 		if world.has(key):
 			parts.append("%s=%s" % [str(key), str(world.get(key))])

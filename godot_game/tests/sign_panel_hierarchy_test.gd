@@ -43,7 +43,6 @@ func _test_signal_footer_updates_as_two_scan_tokens(sign_panel: Node) -> void:
 	sign_panel.call("update_state", {
 		"sign_text": "build stone walls before night",
 		"sign_interpretation": "Ari reads stone and protection.",
-		"personality_summary": "Ari: careful",
 		"run_build": {"preset_name": "Balanced", "role": "Flexible prep", "tags": ["building 2", "mining 2"]},
 		"sign_strength": 0.82,
 		"sign_resonance": 0.64,

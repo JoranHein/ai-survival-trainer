@@ -20,7 +20,7 @@ These rules are permanent project guidance for future Codex sessions.
 
 - AI Survival Trainer is an AI psychology survival game.
 - The player is a godlike whisperer who writes freeform text onto a sign.
-- Ari interprets the sign through personality, fear, danger, instincts, memories, lifetime notes, library reflections, and rest integration.
+- Ari interprets the sign through fear, danger, run instincts, memories, lifetime notes, library reflections, and rest integration.
 - The objective is to understand this Ari well enough to write a sign that unlocks his best emergent survival behavior.
 
 ## Freeform Sign Rule

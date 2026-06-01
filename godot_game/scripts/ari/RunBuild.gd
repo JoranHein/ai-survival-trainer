@@ -19,6 +19,11 @@ const CATEGORIES := [
 	"bow",
 	"attack_range",
 	"thorns",
+	"sword",
+	"attack_damage",
+	"attack_speed",
+	"armor",
+	"smithing",
 ]
 
 var preset_id := "balanced"
@@ -55,6 +60,14 @@ func apply_preset_key(key_number: int) -> bool:
 			return apply_preset("trap_architect")
 		8:
 			return apply_preset("farmer_survivor")
+		9:
+			return apply_preset("sword_killer")
+		10:
+			return apply_preset("heavy_armor_tank")
+		11:
+			return apply_preset("dawn_survivor")
+		12:
+			return apply_preset("smith")
 	return false
 
 
@@ -129,6 +142,14 @@ func get_role() -> String:
 			return "Trap lanes"
 		"farmer_survivor":
 			return "Food recovery"
+		"sword_killer":
+			return "Melee killer"
+		"heavy_armor_tank":
+			return "Armor and regen"
+		"dawn_survivor":
+			return "Outlast dawn"
+		"smith":
+			return "Forge weapons"
 	return _derived_role()
 
 
@@ -200,6 +221,14 @@ func get_effects() -> Dictionary:
 		"trapcraft_strength": get_strength("trapcraft"),
 		"defense_strength": get_strength("defense"),
 		"thorns_strength": get_strength("thorns"),
+		"sword_strength": get_strength("sword"),
+		"attack_damage_bonus": get_value("attack_damage") * 0.045 + get_value("sword") * 0.025,
+		"attack_speed_multiplier": 1.0 + get_value("attack_speed") * 0.035 + get_value("sword") * 0.015,
+		"armor_bonus": get_value("armor") * 0.025,
+		"passive_regen_per_second": get_value("regeneration") * 0.035,
+		"regen_on_kill": get_value("regeneration") * 0.85 + get_value("sword") * 0.28,
+		"smithing_speed_multiplier": 1.0 + get_value("smithing") * 0.070,
+		"ore_yield_multiplier": 1.0 + get_value("mining") * 0.045 + get_value("smithing") * 0.045,
 	}
 
 
@@ -288,6 +317,10 @@ func _category_label(category: String) -> String:
 			return "regen"
 		"attack_range":
 			return "range"
+		"attack_damage":
+			return "damage"
+		"attack_speed":
+			return "speed"
 	return category
 
 
@@ -396,5 +429,43 @@ func _fallback_presets() -> Dictionary:
 				"fear_control": 3,
 			},
 			"thought": "A full stomach makes the dark smaller.",
+		},
+		"sword_killer": {
+			"display_name": "Sword Killer",
+			"points": {
+				"sword": 5,
+				"attack_damage": 3,
+				"attack_speed": 2,
+				"defense": 2,
+			},
+			"thought": "If I have to touch the dead, I will make the touch count.",
+		},
+		"heavy_armor_tank": {
+			"display_name": "Heavy Armor Tank",
+			"points": {
+				"armor": 5,
+				"defense": 4,
+				"regeneration": 3,
+			},
+			"thought": "If I cannot run, I must make my skin patient.",
+		},
+		"dawn_survivor": {
+			"display_name": "Dawn Survivor",
+			"points": {
+				"movement": 4,
+				"fear_control": 3,
+				"defense": 2,
+				"regeneration": 3,
+			},
+			"thought": "I do not have to win the dark. I have to reach morning.",
+		},
+		"smith": {
+			"display_name": "Smith",
+			"points": {
+				"smithing": 5,
+				"mining": 4,
+				"sword": 3,
+			},
+			"thought": "Ore can become an answer if I reach the forge.",
 		},
 	}

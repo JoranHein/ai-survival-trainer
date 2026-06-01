@@ -7,9 +7,11 @@ signal changed(state: Dictionary)
 @export var structures_path := "res://data/structures.json"
 @export var starting_stone := 10
 @export var starting_food := 1
+@export var starting_ore := 0
 
 var stone := 0
 var food := 0
+var ore := 0
 var materials := {}
 var structures := {}
 
@@ -23,6 +25,7 @@ func _ready() -> void:
 func reset_run() -> void:
 	stone = starting_stone
 	food = starting_food
+	ore = starting_ore
 	changed.emit(get_state())
 
 
@@ -42,17 +45,30 @@ func add_food(amount: int) -> void:
 	changed.emit(get_state())
 
 
+func add_ore(amount: int) -> void:
+	var safe_amount: int = maxi(amount, 0)
+	if safe_amount <= 0:
+		return
+	ore += safe_amount
+	changed.emit(get_state())
+
+
 func spend(cost: Dictionary) -> bool:
 	if not can_afford(cost):
 		return false
 	stone -= maxi(int(cost.get("stone", 0)), 0)
 	food -= maxi(int(cost.get("food", 0)), 0)
+	ore -= maxi(int(cost.get("ore", 0)), 0)
 	changed.emit(get_state())
 	return true
 
 
 func can_afford(cost: Dictionary) -> bool:
-	return stone >= maxi(int(cost.get("stone", 0)), 0) and food >= maxi(int(cost.get("food", 0)), 0)
+	return (
+		stone >= maxi(int(cost.get("stone", 0)), 0)
+		and food >= maxi(int(cost.get("food", 0)), 0)
+		and ore >= maxi(int(cost.get("ore", 0)), 0)
+	)
 
 
 func get_stone() -> int:
@@ -61,6 +77,10 @@ func get_stone() -> int:
 
 func get_food() -> int:
 	return food
+
+
+func get_ore() -> int:
+	return ore
 
 
 func spend_food(amount: int) -> bool:
@@ -76,6 +96,7 @@ func get_state() -> Dictionary:
 	return {
 		"stone": stone,
 		"food": food,
+		"ore": ore,
 	}
 
 
@@ -108,9 +129,13 @@ func get_structure(structure_id: String) -> Dictionary:
 
 func get_structure_cost(structure_id: String) -> Dictionary:
 	var structure := get_structure(structure_id)
-	return {
-		"stone": maxi(int(structure.get("stone_cost", 0)), 0),
-	}
+	var cost := {}
+	for resource_key in ["stone", "food", "ore"]:
+		var cost_key := "%s_cost" % resource_key
+		var amount := maxi(int(structure.get(cost_key, 0)), 0)
+		if amount > 0:
+			cost[resource_key] = amount
+	return cost
 
 
 func get_structure_display_name(structure_id: String) -> String:

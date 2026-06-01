@@ -40,7 +40,6 @@ func _test_dead_state_uses_compact_summary(hud: CanvasLayer) -> void:
 		"ari_alive": false,
 		"ari_action": "idle",
 		"ari_job_reason": "Night has started",
-		"personality_summary": "Ari: fearful, practical",
 		"run_build": {"preset_name": "Balanced", "tags": ["building 2"]},
 		"run_build_name": "Balanced",
 		"needs": {"hunger": 72.0, "fear": 26.0, "stamina": 92.0},

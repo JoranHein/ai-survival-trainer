@@ -12,7 +12,6 @@ curl -fsS -X POST "http://127.0.0.1:${PORT}/ai/deep-interpretation" \
   -d '{
     "sign_text": "stand behind the wall",
     "ari": {
-      "personality": {"fearfulness": 0.7, "aggression": 0.2, "curiosity": 0.5, "sign_faith": 0.8},
       "run_build": {"preset": "Builder", "building": 5, "warding": 3},
       "hp": 80,
       "max_hp": 100,

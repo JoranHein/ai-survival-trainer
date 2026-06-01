@@ -13,7 +13,6 @@
 [ext_resource type="Script" path="res://scripts/ari/AriMind.gd" id="11_mind"]
 [ext_resource type="PackedScene" path="res://scenes/ui/ThoughtBubble.tscn" id="12_bubble"]
 [ext_resource type="Script" path="res://scripts/ari/SignMind.gd" id="13_signmind"]
-[ext_resource type="Script" path="res://scripts/ari/Personality.gd" id="14_personality"]
 [ext_resource type="Script" path="res://scripts/ari/RunBuild.gd" id="15_runbuild"]
 [ext_resource type="PackedScene" path="res://scenes/stations/TrainingDummy.tscn" id="16_dummy"]
 [ext_resource type="PackedScene" path="res://scenes/stations/FarmPlot.tscn" id="17_farm"]
@@ -28,6 +27,7 @@
 [ext_resource type="PackedScene" path="res://scenes/structures/ThornTotem.tscn" id="26_thorn"]
 [ext_resource type="PackedScene" path="res://scenes/structures/RepairBench.tscn" id="27_repair"]
 [ext_resource type="PackedScene" path="res://scenes/structures/StormRod.tscn" id="28_storm"]
+[ext_resource type="PackedScene" path="res://scenes/stations/ForgeStation.tscn" id="29_forge"]
 
 [node name="World" type="Node2D"]
 script = ExtResource("1_world")
@@ -59,9 +59,6 @@ script = ExtResource("11_mind")
 [node name="SignMind" type="Node" parent="."]
 script = ExtResource("13_signmind")
 
-[node name="Personality" type="Node" parent="."]
-script = ExtResource("14_personality")
-
 [node name="RunBuild" type="Node" parent="."]
 script = ExtResource("15_runbuild")
 
@@ -77,6 +74,8 @@ script = ExtResource("22_progression")
 [node name="BedStation" parent="." instance=ExtResource("18_bed")]
 
 [node name="Library" parent="." instance=ExtResource("19_library")]
+
+[node name="ForgeStation" parent="." instance=ExtResource("29_forge")]
 
 [node name="BuildGrid" type="Node2D" parent="."]
 z_index = 90

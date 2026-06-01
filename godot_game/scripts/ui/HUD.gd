@@ -20,6 +20,8 @@ func update_state(state: Dictionary) -> void:
 	var enemy_type_counts := _enemy_type_counts(state)
 	var stone := int(state.get("stone", 0))
 	var food := int(state.get("food", 0))
+	var ore := int(state.get("ore", 0))
+	var sword_name := str(state.get("sword_name", "Hands"))
 	var selected_build_type := str(state.get("selected_build_type", "wall"))
 	var selected_build_name := str(state.get("selected_build_name", "Wall"))
 	var build_mode := false
@@ -34,7 +36,6 @@ func update_state(state: Dictionary) -> void:
 	var ari_action := str(state.get("ari_action", "idle"))
 	var combat_stats := _combat_stats(state)
 	var needs := _needs(state)
-	var personality_summary := str(state.get("personality_summary", "Ari: balanced"))
 	var run_build_line := _run_build_line(state)
 	var status_message := str(state.get("status_message", ""))
 	var inspect_text := str(state.get("inspect_text", ""))
@@ -58,7 +59,7 @@ func update_state(state: Dictionary) -> void:
 		_status_header_line(day, phase, time_left, ari_hp, ari_max_hp, enemy_count, enemy_type_counts),
 	]
 	var mind_lines := [
-		"ARI  %s" % _limit_text(personality_summary.trim_prefix("Ari: "), 64),
+		"ARI  Build: %s" % _limit_text(run_build_line, 58),
 		"Doing: %s  Why: %s" % [ari_action, _limit_text(ari_job_reason, 58)],
 	]
 	var build_lines := []
@@ -72,7 +73,7 @@ func update_state(state: Dictionary) -> void:
 	else:
 		var selected_cost := _selected_build_cost(state, selected_build_type)
 		build_lines = [
-			"RESOURCES  Stone %d  Food %d  TP %d" % [stone, food, time_points],
+			"RESOURCES  Stone %d  Ore %d  Food %d  TP %d" % [stone, ore, food, time_points],
 			"Build: %s %dst %s" % [
 				selected_build_name,
 				selected_cost,
@@ -84,7 +85,7 @@ func update_state(state: Dictionary) -> void:
 		var support_line := _support_counts_line(state)
 		if support_line != "Support: none":
 			build_lines.append(support_line)
-		build_lines.append(_combat_summary_line(combat_stats, lesson_count, short_upgrade_summary))
+		build_lines.append(_combat_summary_line(combat_stats, lesson_count, short_upgrade_summary, sword_name))
 		var context_line := _hud_context_line(inspect_text, status_message)
 		if context_line != "":
 			mind_lines.append(context_line)
@@ -245,11 +246,12 @@ func _count_tokens(state: Dictionary, definitions: Array) -> PackedStringArray:
 	return tokens
 
 
-func _combat_summary_line(combat_stats: Dictionary, lesson_count: int, short_upgrade_summary: String) -> String:
-	return "Combat L%.1f  +%d%% dmg  +%d%% def  Notes %d  %s" % [
+func _combat_summary_line(combat_stats: Dictionary, lesson_count: int, short_upgrade_summary: String, sword_name := "Hands") -> String:
+	return "Combat L%.1f  Sword %s  Dmg %.0f  Armor %d%%  Notes %d  %s" % [
 		float(combat_stats.get("combat_level", 0.0)),
-		int(round(float(combat_stats.get("damage_bonus", 0.0)) * 100.0)),
-		int(round(float(combat_stats.get("defense_training", 0.0)) * 100.0)),
+		_limit_text(sword_name, 12),
+		float(combat_stats.get("attack_damage", 7.0)),
+		int(round(float(combat_stats.get("armor", combat_stats.get("defense_training", 0.0))) * 100.0)),
 		lesson_count,
 		short_upgrade_summary,
 	]

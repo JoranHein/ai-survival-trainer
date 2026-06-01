@@ -3,8 +3,8 @@
     "aura_orb": {
       "display_name": "Aura Orb",
       "hp": 28,
-      "radius": 96,
-      "damage_per_second": 7,
+      "radius": 92,
+      "damage_per_second": 6.6,
       "stone_cost": 5
     },
     "spike_trap": {
@@ -19,9 +19,9 @@
       "display_name": "Tower",
       "hp": 34,
       "range": 150,
-      "range_bonus": 32,
-      "damage": 10,
-      "shot_cooldown_seconds": 0.7,
+      "range_bonus": 24,
+      "damage": 9,
+      "shot_cooldown_seconds": 0.75,
       "stone_cost": 8
     },
     "tar_pit": {

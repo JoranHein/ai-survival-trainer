@@ -3,10 +3,10 @@ extends Node
 
 signal phase_changed(day: int, phase: String)
 
-@export var morning_seconds := 20.0
-@export var midday_seconds := 30.0
-@export var dusk_seconds := 15.0
-@export var night_seconds := 25.0
+@export var morning_seconds := 24.0
+@export var midday_seconds := 36.0
+@export var dusk_seconds := 16.0
+@export var night_seconds := 28.0
 
 var day := 1
 var phase := "morning"

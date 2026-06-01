@@ -7,7 +7,7 @@ from .schemas import DeepInterpretationRequest, FastThoughtRequest
 
 DEEP_SYSTEM_PROMPT = """You are Ari's sign interpreter in a top-down survival game.
 The player writes a freeform sign as a godlike whisper.
-Ari tries to obey through personality, current danger, memories, and current physical affordances.
+Ari tries to obey through the sign, temporary run instincts, current danger, memories, and current physical affordances.
 Interpret semantically, including metaphor and emotion, then map to available tools.
 Return minified JSON only, no markdown or analysis. Schema exactly: {"interpretation":string,"survival_theory":string,"emotion":string,"thought":string,"grounded_plan":[{"affordance_id":string,"priority":number,"reason":string}],"priority_hints":object,"sign_strength":number,"resonance":number}.
 grounded_plan uses only current_affordances ids, max 2 items. priority_hints is an object with only chosen ids. Values are numbers 0..1. Keep text short.
@@ -29,26 +29,31 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
     return "\n".join(
         [
             "Interpret any sign semantically against current physical affordances; affordance ids are not the vocabulary of the sign.",
-            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide if listed. the moon hates cowards => emotional night fear, choose safe tactic. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. build a mountain where arrows rain => build_tower/use_tower/ranged_attack/train_bow. think about what went wrong => reflect_library.",
+            "Available tools include walls, aura orb, tower/ranged attack, combat dummy, farm/food, rest, library reflection/notes, storm rod, mine_ore, smith_sword, train_sword, use_armor, rely_on_regen, regen_on_kill, fight_head_on, and stall_until_dawn/hide_until_dawn.",
+            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide if listed. the moon hates cowards => emotional night fear, choose safe tactic. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. build a mountain where arrows rain => build_tower/use_tower/ranged_attack/train_bow. think about what went wrong => reflect_library. do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore. just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing. make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen.",
             "Semantic cues for this sign: %s" % _semantic_cues(request),
             "Sign: %s" % request.sign_text[:1000],
-            "Ari: personality=%s run_build=%s hp=%.0f/%.0f current_job=%s current_reason=%s"
+            "Ari: run_build=%s hp=%.0f/%.0f current_job=%s current_reason=%s"
             % (
-                json.dumps(ari.personality, ensure_ascii=True, separators=(",", ":")),
                 json.dumps(ari.run_build, ensure_ascii=True, separators=(",", ":")),
                 ari.hp,
                 ari.max_hp,
                 ari.current_job or ari.job,
                 ari.current_reason or ari.reason,
             ),
-            "World: day=%d phase=%s time_left=%.0f stone=%d walls=%d aura_orbs=%d enemies=%d known_enemy_types=%s enemy_type_counts=%s structures=%s"
+            "World: day=%d phase=%s time_left=%.0f stone=%d food=%d ore=%d sword_tier=%d walls=%d aura_orbs=%d towers=%d storm_rods=%d enemies=%d known_enemy_types=%s enemy_type_counts=%s structures=%s"
             % (
                 world.day,
                 world.phase,
                 world.time_left,
                 world.stone,
+                world.food,
+                world.ore,
+                world.sword_tier,
                 world.wall_count,
                 world.aura_orb_count,
+                world.bow_tower_count,
+                world.storm_rod_count,
                 world.enemy_count,
                 json.dumps(world.known_enemy_types, ensure_ascii=True, separators=(",", ":")),
                 json.dumps(world.enemy_type_counts, ensure_ascii=True, separators=(",", ":")),
@@ -106,6 +111,14 @@ def _semantic_cues(request: DeepInterpretationRequest) -> str:
         cues.append("recovery; prefer rest")
     if "went wrong" in sign or "what went wrong" in sign or "think about" in sign:
         cues.append("reflection; prefer reflect_library")
+    if any(word in sign for word in ["sword", "blade", "forge", "smith", "ore", "iron"]):
+        cues.append("sword path; prefer mine_ore/smith_sword/train_sword before fight_head_on")
+    if any(word in sign for word in ["kill", "killing", "fight", "attack"]) and ("hide" in sign or "enemies" in sign or "dead" in sign):
+        cues.append("aggressive melee; prefer fight_head_on/train_sword/smith_sword, avoid hide_until_dawn")
+    if any(word in sign for word in ["morning", "dawn", "sunrise"]) and any(word in sign for word in ["survive", "last", "stall", "hide", "wait"]):
+        cues.append("dawn survival; prefer stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing")
+    if "life" in sign and any(word in sign for word in ["kill", "dead", "die", "sword"]):
+        cues.append("life from kills; prefer regen_on_kill/rely_on_regen with sword prep")
     if "moon" in sign and "coward" in sign:
         cues.append("night fear metaphor; choose a safe fear-aware tactic from listed affordances")
     return "; ".join(cues) if cues else "none"

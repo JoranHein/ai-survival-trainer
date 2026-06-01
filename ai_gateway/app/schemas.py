@@ -37,6 +37,18 @@ ALLOWED_PRIORITY_KEYS = {
     "repair_structure",
     "flee",
     "fight",
+    "fight_head_on",
+    "train_sword",
+    "smith_sword",
+    "mine_ore",
+    "build_forge",
+    "use_armor",
+    "rely_on_regen",
+    "regen_on_kill",
+    "stall_until_dawn",
+    "hide_until_dawn",
+    "avoid_killing",
+    "survive_until_morning",
     "kite",
     "hide",
     "build_storm_rod",
@@ -58,7 +70,6 @@ class StrictModel(BaseModel):
 
 
 class AriState(StrictModel):
-    personality: dict[str, Any] = Field(default_factory=dict)
     run_build: dict[str, Any] = Field(default_factory=dict)
     hp: float = 100.0
     max_hp: float = 100.0
@@ -78,8 +89,13 @@ class WorldState(StrictModel):
     phase: str = "morning"
     time_left: float = 0.0
     stone: int = 0
+    food: int = 0
+    ore: int = 0
     wall_count: int = 0
     aura_orb_count: int = 0
+    bow_tower_count: int = 0
+    storm_rod_count: int = 0
+    sword_tier: int = 0
     enemy_count: int = 0
     enemy_type_counts: dict[str, int] = Field(default_factory=dict)
     known_enemy_types: list[str] = Field(default_factory=list)

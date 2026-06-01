@@ -1,0 +1,30 @@
+{
+  "sword_order": [
+    "none",
+    "crude_sword",
+    "iron_sword"
+  ],
+  "sword_tiers": {
+    "none": {
+      "display_name": "Hands",
+      "tier": 0,
+      "ore_cost": 0,
+      "damage_bonus": 0,
+      "armor_bonus": 0
+    },
+    "crude_sword": {
+      "display_name": "Crude Sword",
+      "tier": 1,
+      "ore_cost": 2,
+      "damage_bonus": 5.0,
+      "armor_bonus": 0.02
+    },
+    "iron_sword": {
+      "display_name": "Iron Sword",
+      "tier": 2,
+      "ore_cost": 5,
+      "damage_bonus": 10.0,
+      "armor_bonus": 0.06
+    }
+  }
+}
