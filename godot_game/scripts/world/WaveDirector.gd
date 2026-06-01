@@ -45,12 +45,15 @@ func choose_enemy_type_for_day(day: int, roll := -1.0) -> String:
 	if _wave_rules.is_empty():
 		_load_wave_rules()
 	var rule := _wave_rule_for_day(day)
-	var brute_chance := clampf(float(rule.get("brute_chance", 0.0)), 0.0, 1.0)
-	var runner_chance := clampf(float(rule.get("runner_chance", 0.0)), 0.0, 1.0 - brute_chance)
+	var flying_chance := clampf(float(rule.get("flying_chance", 0.0)), 0.0, 1.0)
+	var brute_chance := clampf(float(rule.get("brute_chance", 0.0)), 0.0, 1.0 - flying_chance)
+	var runner_chance := clampf(float(rule.get("runner_chance", 0.0)), 0.0, 1.0 - flying_chance - brute_chance)
 	var spawn_roll := randf() if roll < 0.0 else clampf(roll, 0.0, 1.0)
-	if spawn_roll < brute_chance:
+	if spawn_roll < flying_chance:
+		return "flying"
+	if spawn_roll < flying_chance + brute_chance:
 		return "brute"
-	if spawn_roll < brute_chance + runner_chance:
+	if spawn_roll < flying_chance + brute_chance + runner_chance:
 		return "runner"
 	return "zombie"
 
@@ -79,6 +82,7 @@ func _load_wave_rules() -> void:
 						"from_day": maxi(1, int(raw_rule.get("from_day", 1))),
 						"runner_chance": clampf(float(raw_rule.get("runner_chance", 0.0)), 0.0, 1.0),
 						"brute_chance": clampf(float(raw_rule.get("brute_chance", 0.0)), 0.0, 1.0),
+						"flying_chance": clampf(float(raw_rule.get("flying_chance", 0.0)), 0.0, 1.0),
 					})
 	if _wave_rules.is_empty():
 		_wave_rules = _default_wave_rules()
@@ -99,8 +103,8 @@ func _wave_rule_for_day(day: int) -> Dictionary:
 
 func _default_wave_rules() -> Array:
 	return [
-		{"from_day": 1, "runner_chance": 0.0, "brute_chance": 0.0},
-		{"from_day": 2, "runner_chance": 0.25, "brute_chance": 0.0},
-		{"from_day": 3, "runner_chance": 0.28, "brute_chance": 0.12},
-		{"from_day": 5, "runner_chance": 0.35, "brute_chance": 0.18},
+		{"from_day": 1, "runner_chance": 0.0, "brute_chance": 0.0, "flying_chance": 0.0},
+		{"from_day": 2, "runner_chance": 0.25, "brute_chance": 0.0, "flying_chance": 0.0},
+		{"from_day": 3, "runner_chance": 0.28, "brute_chance": 0.12, "flying_chance": 0.0},
+		{"from_day": 5, "runner_chance": 0.34, "brute_chance": 0.18, "flying_chance": 0.12},
 	]

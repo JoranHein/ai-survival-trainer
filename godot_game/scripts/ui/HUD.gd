@@ -42,6 +42,7 @@ func update_state(state: Dictionary) -> void:
 	var sign_action_focus := str(state.get("sign_action_focus", ""))
 	var ai_status := str(state.get("ai_status", "AI disabled"))
 	var ai_survival_theory := str(state.get("ai_survival_theory", ""))
+	var ai_top_grounded_plan := str(state.get("ai_top_grounded_plan", ""))
 	var ai_top_hint := str(state.get("ai_top_hint", ""))
 	var progression := _progression(state)
 	var time_points := int(progression.get("time_points", 0))
@@ -97,6 +98,8 @@ func update_state(state: Dictionary) -> void:
 			mind_lines.append(sign_action_focus)
 		if ai_survival_theory != "":
 			mind_lines.append("AI theory: %s" % ai_survival_theory)
+		if ai_top_grounded_plan != "":
+			mind_lines.append("AI plan: %s" % ai_top_grounded_plan)
 		elif ai_top_hint != "":
 			mind_lines.append("Top hint: %s" % ai_top_hint)
 		if ai_status != "":
@@ -159,11 +162,12 @@ func _enemy_mix_token(enemy_count: int, counts: Dictionary) -> String:
 	var zombies := int(counts.get("zombie", 0))
 	var runners := int(counts.get("runner", 0))
 	var brutes := int(counts.get("brute", 0))
+	var flying := int(counts.get("flying", 0))
 	if enemy_count <= 0:
 		return "E0"
-	if runners <= 0 and brutes <= 0:
+	if runners <= 0 and brutes <= 0 and flying <= 0:
 		return "E%d Z%d" % [enemy_count, zombies]
-	return "E%d Z%d R%d B%d" % [enemy_count, zombies, runners, brutes]
+	return "E%d Z%d R%d B%d F%d" % [enemy_count, zombies, runners, brutes, flying]
 
 
 func _hp_meter(value: float, maximum: float) -> String:

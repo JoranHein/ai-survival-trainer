@@ -3,9 +3,11 @@ extends Node
 
 const PROVIDER_LOCAL_STUB := "local_stub"
 const PROVIDER_REMOTE_SERVER := "remote_server"
+const PROVIDER_CACHE := "cache"
 
 const CONFIG_LOCAL_PATH := "res://data/ai_config.local.json"
 const CONFIG_EXAMPLE_PATH := "res://data/ai_config.example.json"
+const DEEP_CACHE_MAX_ENTRIES := 64
 
 const ENDPOINTS := {
 	"deep_interpretation": "/ai/deep-interpretation",
@@ -23,20 +25,43 @@ const DEEP_PRIORITY_KEYS := [
 	"wait_or_idle",
 	"use_existing_wall",
 	"wait_behind_wall",
+	"use_cover",
 	"place_aura_orb",
 	"lure_to_aura",
 	"train_combat",
+	"prepare_weapon",
+	"ranged_attack",
+	"use_tower",
+	"train_bow",
 	"farm_food",
+	"eat",
+	"eat_food",
 	"build_trap",
+	"build_spike_trap",
 	"build_tower",
+	"build_tar_pit",
+	"build_fear_lantern",
+	"build_decoy_idol",
+	"build_thorn_totem",
+	"build_repair_bench",
+	"use_thorns",
 	"rest",
 	"reflect_library",
 	"repair",
+	"repair_structure",
 	"flee",
 	"fight",
 	"kite",
 	"hide",
-	"use_cover",
+	"build_storm_rod",
+	"anti_flying",
+	"sky_answer",
+	"mining",
+	"wall",
+	"aura_orb",
+	"combat_training",
+	"range",
+	"defensive_wait",
 ]
 
 const LEGACY_PRIORITY_HINTS := {
@@ -46,9 +71,12 @@ const LEGACY_PRIORITY_HINTS := {
 	"defensive_wait": "wait_or_idle",
 	"combat_training": "train_combat",
 	"repair_structure": "repair",
+	"build_spike_trap": "build_trap",
 }
 
 var config: Dictionary = {}
+var deep_interpretation_cache := {}
+var deep_interpretation_cache_order: Array[String] = []
 
 
 func _init() -> void:
@@ -86,10 +114,25 @@ func force_provider_mode(provider_mode: String) -> void:
 		config["enabled"] = false
 
 
-func request_deep_interpretation(payload: Dictionary, callback: Callable) -> void:
+func clear_deep_interpretation_cache() -> void:
+	deep_interpretation_cache.clear()
+	deep_interpretation_cache_order.clear()
+
+
+func get_deep_interpretation_cache_size() -> int:
+	return deep_interpretation_cache.size()
+
+
+func request_deep_interpretation(payload: Dictionary, callback: Callable, bypass_cache := false) -> void:
 	if not is_ai_enabled() or not is_inside_tree():
 		_call_callback_deferred(callback, _deep_fallback(payload, "local_fallback"))
 		return
+
+	if not bypass_cache:
+		var cached := _cached_deep_interpretation(payload)
+		if not cached.is_empty():
+			_call_callback_deferred(callback, cached)
+			return
 
 	var url := _configured_endpoint("deep_interpretation", "/ai/deep-interpretation")
 	if url == "":
@@ -105,6 +148,8 @@ func request_deep_interpretation(payload: Dictionary, callback: Callable) -> voi
 
 	http_request.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
 		var response := _parse_deep_interpretation_response(payload, result, response_code, response_body)
+		if bool(response.get("ok", false)):
+			_store_deep_interpretation_cache(payload, response)
 		_safe_call_callback(callback, response)
 		http_request.queue_free()
 	)
@@ -252,6 +297,123 @@ func _parse_deep_interpretation_response(payload: Dictionary, result: int, respo
 	return _validate_deep_interpretation(parsed, payload, true, "remote_server")
 
 
+func _cached_deep_interpretation(payload: Dictionary) -> Dictionary:
+	var key := _deep_cache_key(payload)
+	if key == "" or not deep_interpretation_cache.has(key):
+		return {}
+	var cached = deep_interpretation_cache.get(key, {})
+	if typeof(cached) != TYPE_DICTIONARY:
+		return {}
+	var result: Dictionary = cached.duplicate(true)
+	result["source"] = PROVIDER_CACHE
+	result["cached"] = true
+	result["provider_mode"] = get_provider_mode()
+	return result
+
+
+func _store_deep_interpretation_cache(payload: Dictionary, response: Dictionary) -> void:
+	if not bool(response.get("ok", false)):
+		return
+	var key := _deep_cache_key(payload)
+	if key == "":
+		return
+	var stored := response.duplicate(true)
+	stored["cached"] = false
+	deep_interpretation_cache[key] = stored
+	deep_interpretation_cache_order.erase(key)
+	deep_interpretation_cache_order.append(key)
+	while deep_interpretation_cache_order.size() > DEEP_CACHE_MAX_ENTRIES:
+		var oldest_key := str(deep_interpretation_cache_order.pop_front())
+		deep_interpretation_cache.erase(oldest_key)
+
+
+func _deep_cache_key(payload: Dictionary) -> String:
+	var sign_key := _normalize_cache_text(str(payload.get("sign_text", "")))
+	if sign_key == "":
+		return ""
+	return "sign=%s|%s" % [sign_key, _deep_context_signature(payload)]
+
+
+func _deep_context_signature(payload: Dictionary) -> String:
+	var parts: Array[String] = []
+	var world := _dictionary_value(payload.get("world", {}))
+	for key in [
+		"phase",
+		"wall_count",
+		"aura_orb_count",
+		"bow_tower_count",
+		"storm_rod_count",
+		"enemy_count",
+		"food",
+		"stone",
+	]:
+		if world.has(key):
+			parts.append("%s=%s" % [str(key), str(world.get(key))])
+	parts.append("enemies=%s" % _sorted_key_values(_dictionary_value(world.get("enemy_type_counts", {}))))
+	parts.append("known=%s" % _sorted_string_values(world.get("known_enemy_types", [])))
+	parts.append("structures=%s" % _structure_signature(world.get("structures", [])))
+	parts.append("affordances=%s" % _affordance_signature(payload.get("current_affordances", [])))
+	var latest_note := _normalize_cache_text(str(payload.get("latest_library_note", "")))
+	if latest_note != "":
+		parts.append("note=%s" % latest_note.substr(0, 80))
+	return "|".join(parts)
+
+
+func _normalize_cache_text(text: String) -> String:
+	var cleaned := text.to_lower().replace("\n", " ").replace("\t", " ").strip_edges()
+	var words := cleaned.split(" ", false)
+	return " ".join(words)
+
+
+func _dictionary_value(value) -> Dictionary:
+	if typeof(value) == TYPE_DICTIONARY:
+		return value
+	return {}
+
+
+func _sorted_key_values(value: Dictionary) -> String:
+	var parts: Array[String] = []
+	var keys := value.keys()
+	keys.sort()
+	for raw_key in keys:
+		parts.append("%s:%s" % [str(raw_key), str(value[raw_key])])
+	return ",".join(parts)
+
+
+func _sorted_string_values(value) -> String:
+	if typeof(value) != TYPE_ARRAY:
+		return ""
+	var items: Array[String] = []
+	for item in value:
+		items.append(str(item))
+	items.sort()
+	return ",".join(items)
+
+
+func _structure_signature(value) -> String:
+	if typeof(value) != TYPE_ARRAY:
+		return ""
+	var items: Array[String] = []
+	for item in value:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		items.append("%s:%s" % [str(item.get("type", "")), str(item.get("status", ""))])
+	items.sort()
+	return ",".join(items)
+
+
+func _affordance_signature(value) -> String:
+	if typeof(value) != TYPE_ARRAY:
+		return ""
+	var items: Array[String] = []
+	for item in value:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		items.append("%s:%s" % [str(item.get("id", "")), "1" if bool(item.get("available", false)) else "0"])
+	items.sort()
+	return ",".join(items)
+
+
 func _load_config() -> void:
 	config = _default_config()
 	var config_path := ""
@@ -314,6 +476,8 @@ func _deep_fallback(payload: Dictionary, source := "local_fallback") -> Dictiona
 		"interpretation": str(local.get("interpretation", "Ari falls back to his local reading.")),
 		"thought": "I only understand part of the sign. I will stay careful.",
 		"survival_theory": "local_fallback",
+		"emotion": str(local.get("emotion", "uncertain")),
+		"grounded_plan": local.get("grounded_plan", []),
 		"priority_hints": local.get("priority_hints", {}),
 		"sign_strength": float(local.get("sign_strength", 0.0)),
 		"resonance": float(local.get("resonance", 0.0)),
@@ -325,6 +489,11 @@ func _validate_deep_interpretation(data: Dictionary, payload: Dictionary, ok := 
 	var fallback = payload.get("local_fallback", {})
 	if typeof(fallback) != TYPE_DICTIONARY:
 		fallback = {}
+	var priority_hints := _deep_priority_hints(data.get("priority_hints", fallback.get("priority_hints", {})))
+	var grounded_plan := _deep_grounded_plan(data.get("grounded_plan", fallback.get("grounded_plan", [])))
+	if grounded_plan.is_empty():
+		grounded_plan = _grounded_plan_from_hints(priority_hints)
+	_apply_grounded_plan_to_hints(priority_hints, grounded_plan)
 	var result := {
 		"ok": ok,
 		"provider_mode": get_provider_mode(),
@@ -332,7 +501,9 @@ func _validate_deep_interpretation(data: Dictionary, payload: Dictionary, ok := 
 		"interpretation": _limit_text(str(data.get("interpretation", fallback.get("interpretation", ""))), 240),
 		"thought": _limit_text(str(data.get("thought", "")), 160),
 		"survival_theory": _limit_text(str(data.get("survival_theory", "fallback" if not ok else "")), 64),
-		"priority_hints": _deep_priority_hints(data.get("priority_hints", fallback.get("priority_hints", {}))),
+		"emotion": _limit_text(str(data.get("emotion", fallback.get("emotion", "uncertain"))), 64),
+		"grounded_plan": grounded_plan,
+		"priority_hints": priority_hints,
 		"sign_strength": clampf(float(data.get("sign_strength", fallback.get("sign_strength", 0.0))), 0.0, 1.0),
 		"resonance": clampf(float(data.get("resonance", fallback.get("resonance", 0.0))), 0.0, 1.0),
 	}
@@ -354,6 +525,60 @@ func _deep_priority_hints(value) -> Dictionary:
 			continue
 		result[key] = maxf(float(result[key]), clampf(float(value[raw_key]), 0.0, 1.0))
 	return result
+
+
+func _deep_grounded_plan(value) -> Array:
+	var result := []
+	var seen := {}
+	if typeof(value) != TYPE_ARRAY:
+		return result
+	for raw_item in value:
+		if typeof(raw_item) != TYPE_DICTIONARY:
+			continue
+		var affordance_id := str(raw_item.get("affordance_id", raw_item.get("id", "")))
+		affordance_id = str(LEGACY_PRIORITY_HINTS.get(affordance_id, affordance_id))
+		if not DEEP_PRIORITY_KEYS.has(affordance_id) or seen.has(affordance_id):
+			continue
+		var priority := clampf(float(raw_item.get("priority", 0.0)), 0.0, 1.0)
+		if priority <= 0.0:
+			continue
+		result.append({
+			"affordance_id": affordance_id,
+			"priority": priority,
+			"reason": _limit_text(str(raw_item.get("reason", "")), 180),
+		})
+		seen[affordance_id] = true
+		if result.size() >= 4:
+			break
+	return result
+
+
+func _grounded_plan_from_hints(priority_hints: Dictionary) -> Array:
+	var candidates := []
+	for raw_key in priority_hints.keys():
+		var key := str(raw_key)
+		var priority := clampf(float(priority_hints[raw_key]), 0.0, 1.0)
+		if priority <= 0.0:
+			continue
+		candidates.append({
+			"affordance_id": key,
+			"priority": priority,
+			"reason": "Local fallback made this the closest executable behavior.",
+		})
+	candidates.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a.get("priority", 0.0)) > float(b.get("priority", 0.0))
+	)
+	return candidates.slice(0, mini(candidates.size(), 4))
+
+
+func _apply_grounded_plan_to_hints(priority_hints: Dictionary, grounded_plan: Array) -> void:
+	for item in grounded_plan:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var key := str(item.get("affordance_id", ""))
+		if not priority_hints.has(key):
+			continue
+		priority_hints[key] = maxf(float(priority_hints.get(key, 0.0)), clampf(float(item.get("priority", 0.0)), 0.0, 1.0))
 
 
 func _validated_fallback(kind: String, payload: Dictionary) -> Dictionary:

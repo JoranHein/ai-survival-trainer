@@ -5,7 +5,7 @@
   "deep_interpretation_url": "",
   "fast_thought_url": "",
   "api_key": "",
-  "timeout_seconds": 30.0,
+  "timeout_seconds": 60.0,
   "enable_scribe": true,
   "enable_library_reflection": true,
   "enable_sleep_plan": true,

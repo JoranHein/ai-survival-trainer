@@ -34,6 +34,7 @@ func _test_sign_panel_splits_context_from_reading(sign_panel: Node) -> void:
 	_assert(sign_panel.find_child("AriContextLabel", true, false) != null, "SignPanel should have a compact Ari context label")
 	_assert(sign_panel.find_child("RunContextLabel", true, false) != null, "SignPanel should have a compact run context label")
 	_assert(sign_panel.find_child("ReadingLabel", true, false) != null, "SignPanel should have a dedicated sign reading label")
+	_assert(sign_panel.find_child("PlanLabel", true, false) != null, "SignPanel should show the top grounded plan as its own line")
 	_assert(sign_panel.find_child("InterpretationLabel", true, false) == null, "SignPanel should not use one combined multiline interpretation label")
 
 
@@ -43,6 +44,8 @@ func _test_sign_panel_keeps_long_readings_bounded(sign_panel: Node) -> void:
 		"sign_interpretation": "Ari reads stone and protection, then decides that walls matter more than anything else until the dark arrives and teeth start pressing against the outer edge.",
 		"personality_summary": "Ari: brave, practical, sign-faithful",
 		"run_build": {"preset_name": "Fast Coward", "role": "Kite and calm", "tags": ["move 7", "fear 3", "building 2"]},
+		"ai_survival_theory": "Use existing cover instead of adding stone.",
+		"ai_top_grounded_plan": "use_existing_wall: Keep the wall between Ari and teeth.",
 		"sign_strength": 0.91,
 		"sign_resonance": 0.97,
 	})
@@ -51,7 +54,8 @@ func _test_sign_panel_keeps_long_readings_bounded(sign_panel: Node) -> void:
 	var ari_context_label: Label = sign_panel.find_child("AriContextLabel", true, false)
 	var run_context_label: Label = sign_panel.find_child("RunContextLabel", true, false)
 	var reading_label: Label = sign_panel.find_child("ReadingLabel", true, false)
-	if ari_context_label == null or run_context_label == null or reading_label == null:
+	var plan_label: Label = sign_panel.find_child("PlanLabel", true, false)
+	if ari_context_label == null or run_context_label == null or reading_label == null or plan_label == null:
 		return
 	_assert(not ari_context_label.text.contains("\n"), "Ari context should stay on one line")
 	_assert(not run_context_label.text.contains("\n"), "Run context should stay on one line")
@@ -59,6 +63,8 @@ func _test_sign_panel_keeps_long_readings_bounded(sign_panel: Node) -> void:
 	_assert(run_context_label.text.length() <= 42, "Run context should be compact")
 	_assert(reading_label.text.begins_with("Reads: "), "Reading line should have a short scan prefix")
 	_assert(reading_label.text.length() <= 98, "Reading line should be bounded so it does not press into the footer")
+	_assert(plan_label.text.begins_with("Plan: "), "Grounded plan line should have a short scan prefix")
+	_assert(plan_label.text.length() <= 98, "Grounded plan line should be bounded")
 
 
 func _assert(condition: bool, message: String) -> void:

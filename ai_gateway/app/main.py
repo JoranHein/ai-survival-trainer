@@ -55,10 +55,11 @@ async def deep_interpretation(
     _: Annotated[None, Depends(require_api_key)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict:
-    fallback = fallback_deep_response(request.local_fallback)
+    fallback = fallback_deep_response(request.local_fallback, request.current_affordances)
     try:
         model_result = await call_deep_model(request, settings)
-        return sanitize_deep_response(model_result, fallback)
+        allowed_ids = {item.id for item in request.current_affordances} or None
+        return sanitize_deep_response(model_result, fallback, allowed_ids)
     except Exception:
         return fallback
 

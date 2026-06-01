@@ -11,6 +11,7 @@ signal died(enemy: Node)
 @export var attack_cooldown_seconds := 1.0
 @export var structure_attack_damage := 8.0
 @export var enemy_type := "zombie"
+@export var ignores_walls := false
 
 var target: Node2D
 var world: Node
@@ -42,6 +43,7 @@ func configure_from_data(next_type: String, data: Dictionary) -> void:
 	attack_range = float(stats.get("attack_range", attack_range))
 	attack_cooldown_seconds = float(stats.get("attack_cooldown_seconds", attack_cooldown_seconds))
 	structure_attack_damage = float(stats.get("structure_attack_damage", structure_attack_damage))
+	ignores_walls = stats.get("ignores_walls", ignores_walls) == true
 	hp = clampf(hp, 0.0, max_hp)
 	if hp <= 0.0:
 		hp = max_hp
@@ -63,15 +65,16 @@ func _process(delta: float) -> void:
 	if not is_alive() or target == null or not bool(target.call("is_alive")):
 		return
 
-	var attraction_target := _attraction_target()
-	if attraction_target != null:
-		_move_or_attack_attraction(attraction_target, delta)
-		return
+	if not ignores_walls:
+		var attraction_target := _attraction_target()
+		if attraction_target != null:
+			_move_or_attack_attraction(attraction_target, delta)
+			return
 
-	var blocking_structure := _find_blocking_structure()
-	if blocking_structure != null:
-		_move_or_attack_structure(blocking_structure, delta)
-		return
+		var blocking_structure := _find_blocking_structure()
+		if blocking_structure != null:
+			_move_or_attack_structure(blocking_structure, delta)
+			return
 
 	var to_target: Vector2 = target.global_position - global_position
 	_face_towards(target.global_position)
@@ -224,9 +227,27 @@ func _draw() -> void:
 			core_color = Color(0.12, 0.00, 0.02, 1.0)
 			ring_color = Color(1.0, 0.20, 0.24, 1.0)
 			outline_width = 3.5
+		"flying":
+			body_color = Color(0.50, 0.72, 1.0, 1.0)
+			core_color = Color(0.10, 0.12, 0.36, 1.0)
+			ring_color = Color(0.86, 0.96, 1.0, 1.0)
+			outline_width = 2.2
 	if _hit_flash > 0.0:
 		body_color = Color(1.0, 0.82, 0.48, 1.0)
-	draw_circle(Vector2(3.0, 6.0), radius + 5.0, Color(0.0, 0.0, 0.0, 0.34))
+	var shadow_offset := Vector2(5.0, 12.0) if enemy_type == "flying" else Vector2(3.0, 6.0)
+	var shadow_alpha := 0.22 if enemy_type == "flying" else 0.34
+	draw_circle(shadow_offset, radius + 5.0, Color(0.0, 0.0, 0.0, shadow_alpha))
+	if enemy_type == "flying":
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(-radius * 0.20, -radius * 0.10),
+			Vector2(-radius * 1.85, -radius * 0.66),
+			Vector2(-radius * 1.18, radius * 0.56),
+		]), Color(0.34, 0.54, 0.92, 0.92))
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(radius * 0.20, -radius * 0.10),
+			Vector2(radius * 1.85, -radius * 0.66),
+			Vector2(radius * 1.18, radius * 0.56),
+		]), Color(0.34, 0.54, 0.92, 0.92))
 	draw_circle(Vector2.ZERO, radius + 3.5, Color(0.08, 0.00, 0.01, 0.96))
 	draw_circle(Vector2.ZERO, radius, body_color)
 	draw_circle(Vector2.ZERO, radius * 0.45, core_color)
@@ -238,6 +259,10 @@ func _draw() -> void:
 	elif enemy_type == "brute":
 		draw_rect(Rect2(Vector2(-radius * 0.75, -radius * 0.75), Vector2(radius * 1.5, radius * 1.5)), Color(0.18, 0.02, 0.03, 0.5), false, 2.0)
 		draw_rect(Rect2(Vector2(-radius * 0.45, -radius * 1.05), Vector2(radius * 0.9, radius * 0.32)), ring_color.darkened(0.12), true)
+	elif enemy_type == "flying":
+		draw_arc(Vector2.ZERO, radius + 7.0, PI * 0.08, PI * 0.92, 24, Color(0.76, 0.92, 1.0, 0.80), 2.0)
+		draw_line(Vector2(-radius * 1.28, -radius * 0.18), Vector2(-radius * 0.20, radius * 0.28), ring_color, 1.8)
+		draw_line(Vector2(radius * 1.28, -radius * 0.18), Vector2(radius * 0.20, radius * 0.28), ring_color, 1.8)
 	else:
 		draw_line(Vector2(-radius * 0.55, radius * 0.86), Vector2(radius * 0.55, radius * 0.86), ring_color, 1.8)
 	draw_rect(Rect2(Vector2(-14.0, -22.0), Vector2(28.0, 4.0)), Color(0.08, 0.02, 0.02, 0.9), true)
@@ -247,7 +272,7 @@ func _draw() -> void:
 
 
 func _known_type(next_type: String) -> String:
-	if ["zombie", "runner", "brute"].has(next_type):
+	if ["zombie", "runner", "brute", "flying"].has(next_type):
 		return next_type
 	return "zombie"
 
@@ -263,6 +288,7 @@ func _default_stats(next_type: String) -> Dictionary:
 				"attack_range": 22.0,
 				"attack_cooldown_seconds": 0.75,
 				"structure_attack_damage": 5.0,
+				"ignores_walls": false,
 			}
 		"brute":
 			return {
@@ -273,6 +299,18 @@ func _default_stats(next_type: String) -> Dictionary:
 				"attack_range": 28.0,
 				"attack_cooldown_seconds": 1.25,
 				"structure_attack_damage": 22.0,
+				"ignores_walls": false,
+			}
+		"flying":
+			return {
+				"max_hp": 28.0,
+				"speed": 96.0,
+				"radius": 11.0,
+				"attack_damage": 11.0,
+				"attack_range": 24.0,
+				"attack_cooldown_seconds": 0.95,
+				"structure_attack_damage": 2.0,
+				"ignores_walls": true,
 			}
 	return {
 		"max_hp": 35.0,
@@ -282,6 +320,7 @@ func _default_stats(next_type: String) -> Dictionary:
 		"attack_range": 24.0,
 		"attack_cooldown_seconds": 1.0,
 		"structure_attack_damage": 8.0,
+		"ignores_walls": false,
 	}
 
 

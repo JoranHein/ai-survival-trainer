@@ -45,7 +45,7 @@ anchor_right = 1.0
 offset_left = -424.0
 offset_top = 20.0
 offset_right = -24.0
-offset_bottom = 224.0
+offset_bottom = 264.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_display")
 
@@ -97,6 +97,22 @@ theme_override_font_sizes/font_size = 14
 text = "Reads: No sign yet."
 autowrap_mode = 3
 
+[node name="TheoryLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.80, 0.88, 0.82, 1)
+theme_override_font_sizes/font_size = 12
+text = "Theory: local reading"
+autowrap_mode = 3
+
+[node name="PlanLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.84, 0.70, 1)
+theme_override_font_sizes/font_size = 12
+text = "Plan: watch and survive"
+autowrap_mode = 3
+
 [node name="SignalSeparator" type="ColorRect" parent="DisplayPanel/DisplayVBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 1)
@@ -134,9 +150,9 @@ anchors_preset = -1
 anchor_left = 1.0
 anchor_right = 1.0
 offset_left = -424.0
-offset_top = 236.0
+offset_top = 276.0
 offset_right = -24.0
-offset_bottom = 430.0
+offset_bottom = 470.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_editor")
 
 [node name="EditorVBox" type="VBoxContainer" parent="EditorPanel"]

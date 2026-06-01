@@ -12,6 +12,8 @@ signal sign_cancelled
 @onready var ari_context_label: Label = %AriContextLabel
 @onready var run_context_label: Label = %RunContextLabel
 @onready var reading_label: Label = %ReadingLabel
+@onready var theory_label: Label = %TheoryLabel
+@onready var plan_label: Label = %PlanLabel
 @onready var signal_label: Label = %SignalLabel
 @onready var resonance_label: Label = %ResonanceLabel
 
@@ -30,6 +32,8 @@ func _ready() -> void:
 func update_state(state: Dictionary) -> void:
 	_current_sign_text = str(state.get("sign_text", _current_sign_text))
 	var interpretation := str(state.get("sign_interpretation", "No sign yet."))
+	var survival_theory := str(state.get("ai_survival_theory", "")).strip_edges()
+	var top_plan := str(state.get("ai_top_grounded_plan", "")).strip_edges()
 	var personality_summary := str(state.get("personality_summary", "Ari: balanced"))
 	var sign_strength := clampf(float(state.get("sign_strength", 0.0)), 0.0, 1.0)
 	var resonance := clampf(float(state.get("sign_resonance", 0.0)), 0.0, 1.0)
@@ -38,6 +42,8 @@ func update_state(state: Dictionary) -> void:
 	ari_context_label.text = _limit_text("Ari: %s" % personality_summary.trim_prefix("Ari: "), 34)
 	run_context_label.text = _limit_text("Run: %s" % _compact_run_build_line(state), 42)
 	reading_label.text = "Reads: %s" % _limit_text(interpretation, 91)
+	theory_label.text = "Theory: %s" % _limit_text(survival_theory if survival_theory != "" else "local reading", 89)
+	plan_label.text = "Plan: %s" % _limit_text(top_plan if top_plan != "" else "watch and survive", 91)
 	signal_label.text = "SIGNAL %d%%" % int(round(sign_strength * 100.0))
 	resonance_label.text = "RESONANCE %d%%" % int(round(resonance * 100.0))
 

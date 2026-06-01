@@ -72,11 +72,13 @@ var death_reward := 0
 var sign_text := ""
 var sign_interpretation := "No sign yet."
 var sign_priority_hints := {}
+var sign_grounded_plan: Array = []
 var sign_strength := 0.0
 var sign_resonance := 0.0
 var ai_bridge: AIBridge
 var ai_status := "AI disabled"
 var ai_survival_theory := ""
+var ai_emotion := ""
 var personality_traits := {}
 var personality_summary := "Ari: balanced"
 var ari_memory := AriMemory.new()
@@ -92,10 +94,14 @@ var _stamina_pressure_reported := false
 var _near_death_reported := false
 var _aura_damage_reported := false
 var _ai_sign_request_id := 0
+var _ai_waiting_active := false
+var _ai_waiting_elapsed := 0.0
+var _ai_waiting_last_second := -1
 var _ari_ranged_cooldown := 0.0
 var _ari_ranged_flash_time := 0.0
 var _ari_ranged_flash_from := Vector2.ZERO
 var _ari_ranged_flash_to := Vector2.ZERO
+var _farming_yield_remainder := 0.0
 var _enemy_data := {}
 var _noticed_enemy_types := {}
 
@@ -116,6 +122,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_update_status_message(delta)
+	_advance_ai_waiting(delta)
 	_update_ari_ranged_attack_timers(delta)
 	day_night.advance(delta)
 	wave_director.advance(delta, day_night.is_night(), _is_ari_alive())
@@ -171,6 +178,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			toggle_remote_ai()
 		elif event.keycode == KEY_F7:
 			retry_ai_interpretation()
+		elif event.keycode == KEY_F8:
+			clear_ai_interpretation_cache()
 		elif event.keycode == KEY_1:
 			select_run_build_preset(1)
 		elif event.keycode == KEY_2:
@@ -213,14 +222,20 @@ func start_run() -> void:
 	_ari_ranged_cooldown = 0.0
 	_ari_ranged_flash_time = 0.0
 	_noticed_enemy_types = {}
+	_farming_yield_remainder = 0.0
 	status_message = ""
 	status_message_time = 0.0
 	latest_thought = ""
 	death_recap = ""
 	death_reward = 0
 	_ai_sign_request_id += 1
+	_finish_ai_waiting()
 	_update_ai_idle_status()
 	ai_survival_theory = ""
+	ai_emotion = ""
+	sign_grounded_plan = []
+	if permanent_progression != null and permanent_progression.has_method("reset_run"):
+		permanent_progression.call("reset_run")
 	run_build.call("reset_run")
 	personality.call("randomize_for_run")
 	personality_traits = personality.call("get_traits")
@@ -301,9 +316,15 @@ func stage_visual_review_moment(moment: String) -> void:
 			sign_priority_hints = _normalize_ai_priority_hints({
 				"reflect_library": 0.9,
 			})
+			sign_grounded_plan = _normalize_grounded_plan([{
+				"affordance_id": "reflect_library",
+				"priority": 0.9,
+				"reason": "The sign asks Ari to think about what went wrong.",
+			}])
 			sign_strength = 0.82
 			sign_resonance = 0.80
 			ai_survival_theory = "library_reflection"
+			ai_emotion = "curious regret"
 			ai_status = "AI staged"
 			_stage_ari_needs(28.0, 88.0, 24.0)
 			day_night.advance(21.0)
@@ -321,24 +342,38 @@ func stage_visual_review_moment(moment: String) -> void:
 			resource_system.call("add_stone", 84)
 			_place_visual_review_defense_layout(arena)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 26.0)
-			commit_sign("build a mountain where arrows rain and the dead walk through light")
-			sign_interpretation = "Ari reads height, arrows, and light. The tower can shoot while they cross the orb."
+			commit_sign("build a mountain where arrows rain while storm answers wings")
+			sign_interpretation = "Ari reads height, arrows, and storm. The tower can shoot while the rod answers the sky."
 			sign_priority_hints = _normalize_ai_priority_hints({
 				"use_tower": 0.95,
 				"ranged_attack": 0.9,
 				"lure_to_aura": 0.45,
+				"anti_flying": 0.85,
 			})
+			sign_grounded_plan = _normalize_grounded_plan([
+				{
+					"affordance_id": "use_tower",
+					"priority": 0.95,
+					"reason": "The sign asks for height and arrows.",
+				},
+				{
+					"affordance_id": "anti_flying",
+					"priority": 0.85,
+					"reason": "The sign says storm should answer wings.",
+				},
+			])
 			sign_strength = 0.80
 			sign_resonance = 0.78
 			ai_survival_theory = "tower_range"
+			ai_emotion = "focused fear"
 			ai_status = "AI staged"
 			selected_build_type = BOW_TOWER_BUILD_ID
 			build_grid.call("set_selected_build_type", selected_build_type)
-			_set_status_message("Tower range active.", 2.0)
+			_set_status_message("Tower and storm range active.", 2.0)
 			_spawn_enemy(arena.get_center() + Vector2(260.0, -112.0), "zombie")
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.58, arena.size.y * 0.84), "runner")
 			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.18, arena.size.y * 0.78), "brute")
-			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.75, arena.size.y * 0.18), "runner")
+			_spawn_enemy(arena.position + Vector2(arena.size.x * 0.75, arena.size.y * 0.18), "flying")
 			_advance_ari_night_tactic(3.0)
 			_show_current_job_thought(true)
 			_damage_structure_near(arena.get_center() + Vector2(72.0, -16.0), 999.0)
@@ -401,7 +436,7 @@ func buy_permanent_upgrade_key(key_number: int) -> bool:
 	_apply_run_build_to_ari()
 	_reinterpret_current_sign()
 	_set_status_message("Permanent upgrade learned.", 1.6)
-	_show_ari_thought("Some lessons stay after death.", true)
+	_show_ari_thought("I feel a little more ready for the next night.", true)
 	_emit_state()
 	return true
 
@@ -427,6 +462,8 @@ func toggle_remote_ai() -> void:
 	if ai_bridge == null:
 		return
 	ai_bridge.set_ai_enabled(not ai_bridge.is_ai_enabled())
+	if not ai_bridge.is_ai_enabled():
+		_finish_ai_waiting()
 	_update_ai_idle_status()
 	_set_status_message("Remote AI ON." if ai_bridge.is_ai_enabled() else "Remote AI OFF.", 1.4)
 	_emit_state()
@@ -444,7 +481,17 @@ func retry_ai_interpretation() -> void:
 		_set_status_message("Write a sign before retrying AI.", 1.4)
 		_emit_state()
 		return
-	_request_ai_deep_interpretation()
+	_request_ai_deep_interpretation(true, true)
+
+
+func clear_ai_interpretation_cache() -> void:
+	if ai_bridge == null or not ai_bridge.has_method("clear_deep_interpretation_cache"):
+		return
+	ai_bridge.call("clear_deep_interpretation_cache")
+	if not _ai_waiting_active:
+		_update_ai_idle_status()
+	_set_status_message("AI cache cleared.", 1.4)
+	_emit_state()
 
 
 func _select_wall_build_mode() -> void:
@@ -653,7 +700,7 @@ func _get_enemy_data(enemy_type: String) -> Dictionary:
 
 
 func _normalize_enemy_type(enemy_type: String) -> String:
-	if ["zombie", "runner", "brute"].has(enemy_type):
+	if ["zombie", "runner", "brute", "flying"].has(enemy_type):
 		return enemy_type
 	return "zombie"
 
@@ -663,6 +710,7 @@ func _get_enemy_type_counts() -> Dictionary:
 		"zombie": 0,
 		"runner": 0,
 		"brute": 0,
+		"flying": 0,
 	}
 	for enemy in enemies:
 		if not is_instance_valid(enemy):
@@ -681,6 +729,8 @@ func _show_new_enemy_type_thought(enemy_type: String) -> void:
 			_show_ari_thought("That one is too fast. Walls may not be enough.", true)
 		"brute":
 			_show_ari_thought("That thing breaks stone like it is afraid of silence.", true)
+		"flying":
+			_show_ari_thought("The flying ones do not care about stone.", true)
 
 
 func clear_enemies() -> void:
@@ -899,10 +949,13 @@ func _emit_state() -> void:
 		"sign_strength": sign_strength,
 		"sign_resonance": sign_resonance,
 		"sign_priority_hints": sign_priority_hints,
+		"sign_grounded_plan": sign_grounded_plan,
 		"sign_action_focus": _get_sign_action_focus(ari_job, ari_job_reason),
 		"ai_status": ai_status,
 		"ai_survival_theory": ai_survival_theory,
+		"ai_emotion": ai_emotion,
 		"ai_top_hint": _get_top_priority_hint(sign_priority_hints),
+		"ai_top_grounded_plan": _get_top_grounded_plan_text(),
 		"personality": personality_traits,
 		"personality_summary": personality_summary,
 		"run_build": _get_run_build_context(),
@@ -1232,6 +1285,8 @@ func _on_resource_changed(_resource_state: Dictionary) -> void:
 
 
 func _on_permanent_progression_changed(_progression_state: Dictionary) -> void:
+	_apply_run_build_to_ari()
+	_reinterpret_current_sign()
 	_emit_state()
 
 
@@ -1271,7 +1326,10 @@ func _advance_ari_daytime(delta: float) -> void:
 			_set_ari_intent(_get_station_spot(farm_plot, "get_work_spot"), "Farm")
 			var produced := int(ari.call("advance_farming_job", delta, true, reason))
 			if produced > 0:
-				ari_memory.record_event("food_harvested", {"food": produced, "day": day_night.day})
+				var bonus_food := _take_permanent_farming_bonus(produced)
+				if bonus_food > 0 and resource_system != null and resource_system.has_method("add_food"):
+					resource_system.call("add_food", bonus_food)
+				ari_memory.record_event("food_harvested", {"food": produced + bonus_food, "day": day_night.day})
 				_show_ari_thought("If I am fed, the night feels smaller.")
 		"eat_food":
 			_set_ari_intent(ari.global_position, "Eat")
@@ -1498,6 +1556,7 @@ func _get_ari_mind_context() -> Dictionary:
 		"meaningful_event_count": _get_meaningful_event_count(),
 		"lesson_priority_bias": _get_lesson_priority_bias(),
 		"priority_hints": sign_priority_hints,
+		"grounded_plan": sign_grounded_plan,
 		"personality": personality_traits,
 		"run_build": _get_run_build_context(),
 		"current_job": str(ari.call("get_current_job")) if ari != null else "wait_or_idle",
@@ -1640,6 +1699,15 @@ func _get_active_repair_multiplier(structure_position: Vector2) -> float:
 		if is_instance_valid(repair_bench) and repair_bench.has_method("get_active_repair_multiplier_for"):
 			multiplier = maxf(multiplier, float(repair_bench.call("get_active_repair_multiplier_for", structure_position)))
 	return clampf(multiplier, 0.5, 3.0)
+
+
+func _take_permanent_farming_bonus(produced: int) -> int:
+	var multiplier := maxf(float(_get_run_build_effects().get("farming_yield_multiplier", 1.0)), 1.0)
+	_farming_yield_remainder += float(maxi(produced, 0)) * (multiplier - 1.0)
+	var bonus := int(floor(_farming_yield_remainder))
+	if bonus > 0:
+		_farming_yield_remainder -= float(bonus)
+	return bonus
 
 
 func _damage_structure_near(world_position: Vector2, amount: float) -> void:
@@ -2620,6 +2688,7 @@ func _show_sign_interpretation_thought(force := false) -> void:
 	var interpretation := {
 		"interpretation_text": sign_interpretation,
 		"priority_hints": sign_priority_hints,
+		"grounded_plan": sign_grounded_plan,
 		"sign_strength": sign_strength,
 		"resonance": sign_resonance,
 	}
@@ -2628,6 +2697,14 @@ func _show_sign_interpretation_thought(force := false) -> void:
 
 
 func _get_sign_action_focus(ari_job: String, ari_job_reason: String) -> String:
+	var top_plan := _get_top_grounded_plan_item()
+	if not top_plan.is_empty():
+		var plan_id := str(top_plan.get("affordance_id", ""))
+		if _job_matches_affordance(ari_job, plan_id):
+			return "AI plan: %s -> Ari is following it." % _affordance_label(plan_id)
+		var reason := str(top_plan.get("reason", "")).strip_edges()
+		if reason != "":
+			return "AI plan: %s -> %s" % [_affordance_label(plan_id), _limit_inline(reason, 58)]
 	var ai_hint := _get_top_priority_hint(sign_priority_hints)
 	if ari_job == "use_cover":
 		return "AI pull: cover -> Ari is following it."
@@ -2642,39 +2719,45 @@ func _get_sign_action_focus(ari_job: String, ari_job_reason: String) -> String:
 	return str(sign_mind.call("describe_action_focus", sign_priority_hints, ari_job, ari_job_reason))
 
 
-func _request_ai_deep_interpretation(show_waiting := true) -> void:
+func _request_ai_deep_interpretation(show_waiting := true, bypass_cache := false) -> void:
 	if ai_bridge == null or not ai_bridge.is_ai_enabled():
+		_finish_ai_waiting()
 		_update_ai_idle_status()
 		return
 	if sign_text.strip_edges() == "":
-		ai_status = "AI active"
+		_finish_ai_waiting()
+		ai_status = "AI: active"
 		_emit_state()
 		return
 	_ai_sign_request_id += 1
 	var request_id := _ai_sign_request_id
 	if show_waiting:
-		ai_status = "AI waiting"
+		_begin_ai_waiting()
 		_emit_state()
 	var payload := _build_ai_deep_interpretation_payload()
-	ai_bridge.request_deep_interpretation(payload, func(result: Dictionary) -> void:
+	var callback := func(result: Dictionary) -> void:
 		_on_ai_deep_interpretation_response(request_id, result)
-	)
+	ai_bridge.request_deep_interpretation(payload, callback, bypass_cache)
 
 
 func _on_ai_deep_interpretation_response(request_id: int, result: Dictionary) -> void:
 	if request_id != _ai_sign_request_id:
 		return
+	_finish_ai_waiting()
 	if not bool(result.get("ok", false)):
-		ai_status = "AI fallback"
+		ai_status = "AI: failed/fallback"
+		_show_ari_thought("The deeper answer did not arrive. I will trust the first reading.", true)
 		_emit_state()
 		return
 
 	sign_interpretation = str(result.get("interpretation", sign_interpretation))
-	sign_priority_hints = _normalize_ai_priority_hints(result.get("priority_hints", {}))
+	sign_grounded_plan = _normalize_grounded_plan(result.get("grounded_plan", []))
+	sign_priority_hints = _merge_priority_hints(sign_priority_hints, _priority_hints_from_grounded_plan(sign_grounded_plan), result.get("priority_hints", {}))
 	sign_strength = clampf(float(result.get("sign_strength", sign_strength)), 0.0, 1.0)
 	sign_resonance = clampf(float(result.get("resonance", sign_resonance)), 0.0, 1.0)
 	ai_survival_theory = str(result.get("survival_theory", "")).strip_edges()
-	ai_status = "AI active"
+	ai_emotion = str(result.get("emotion", "")).strip_edges()
+	ai_status = "AI: cached" if bool(result.get("cached", false)) or str(result.get("source", "")) == "cache" else "AI: active"
 	var thought := str(result.get("thought", "")).strip_edges()
 	if thought != "":
 		_show_ari_thought(thought, true)
@@ -2682,7 +2765,45 @@ func _on_ai_deep_interpretation_response(request_id: int, result: Dictionary) ->
 
 
 func _update_ai_idle_status() -> void:
-	ai_status = "AI active" if ai_bridge != null and ai_bridge.is_ai_enabled() else "AI disabled"
+	if _ai_waiting_active:
+		return
+	ai_status = "AI: active" if ai_bridge != null and ai_bridge.is_ai_enabled() else "AI disabled"
+
+
+func _begin_ai_waiting() -> void:
+	_ai_waiting_active = true
+	_ai_waiting_elapsed = 0.0
+	_ai_waiting_last_second = -1
+	_update_ai_waiting_status()
+	_show_ari_thought("The sign is deeper than it looks. I need a moment.", true)
+
+
+func _advance_ai_waiting(delta: float) -> void:
+	if not _ai_waiting_active:
+		return
+	_ai_waiting_elapsed = maxf(0.0, _ai_waiting_elapsed + delta)
+	var current_second := int(floor(_ai_waiting_elapsed))
+	if current_second == _ai_waiting_last_second:
+		return
+	_update_ai_waiting_status()
+	if is_inside_tree():
+		_emit_state()
+
+
+func _finish_ai_waiting() -> void:
+	_ai_waiting_active = false
+
+
+func _update_ai_waiting_status() -> void:
+	var seconds := int(floor(_ai_waiting_elapsed))
+	_ai_waiting_last_second = seconds
+	var dots := ""
+	for _i in range(seconds % 4):
+		dots += "."
+	if seconds >= 15:
+		ai_status = "AI: still thinking %ds%s" % [seconds, dots]
+	else:
+		ai_status = "AI: thinking %ds%s" % [seconds, dots]
 
 
 func _build_ai_deep_interpretation_payload() -> Dictionary:
@@ -2712,13 +2833,198 @@ func _build_ai_deep_interpretation_payload() -> Dictionary:
 			"known_enemy_types": _known_enemy_types(),
 			"structures": _ai_structure_state(),
 		},
+		"current_affordances": _current_affordances(),
+		"recent_thoughts": _recent_ai_thoughts(),
+		"latest_library_note": _latest_library_note_text(),
 		"local_fallback": {
 			"interpretation": sign_interpretation,
 			"priority_hints": sign_priority_hints,
+			"emotion": ai_emotion,
+			"grounded_plan": sign_grounded_plan,
 			"sign_strength": sign_strength,
 			"resonance": sign_resonance,
 		},
 	}
+
+
+func _current_affordances() -> Array:
+	var stone := _stone_count()
+	var food := _food_count()
+	var has_wall := walls.size() > 0
+	var has_aura := aura_orbs.size() > 0
+	var has_tower := bow_towers.size() > 0
+	var damaged_count := _get_damaged_structure_count()
+	return [
+		_affordance("mine_stone", "Mine stone for structures and defenses.", true),
+		_affordance("build_wall", "Spend stone to build a new wall block.", stone >= int(_get_wall_cost().get("stone", 0)), "not enough stone"),
+		_affordance("use_existing_wall", "Move near an existing wall so enemies must hit or go around it before reaching Ari.", has_wall, "no wall exists"),
+		_affordance("wait_behind_wall", "Wait on the safe side of an existing wall.", has_wall, "no wall exists"),
+		_affordance("use_cover", "Use current cover instead of adding a new structure.", has_wall or has_tower, "no cover exists"),
+		_affordance("place_aura_orb", "Spend stone to place an Aura Orb that damages enemies inside its circle.", stone >= int(_get_aura_orb_cost().get("stone", 0)), "not enough stone"),
+		_affordance("lure_to_aura", "Stand near the safe side of an Aura Orb so enemies pass through the damaging circle.", has_aura, "no Aura Orb exists"),
+		_affordance("train_combat", "Practice at the training dummy to improve combat readiness.", true),
+		_affordance("prepare_weapon", "Prepare Ari for direct danger through combat training.", true),
+		_affordance("build_tower", "Spend stone to build a bow tower for height and ranged safety.", stone >= int(_get_bow_tower_cost().get("stone", 0)), "not enough stone"),
+		_affordance("use_tower", "Use an existing tower perch to keep distance from ground enemies.", has_tower, "no tower exists"),
+		_affordance("ranged_attack", "Attack from tower range when a tower and target exist.", has_tower, "no tower exists"),
+		_affordance("train_bow", "Practice ranged thinking through tower and combat preparation.", true),
+		_affordance("farm_food", "Work the farm plot to create food.", true),
+		_affordance("eat_food", "Eat stored food to lower hunger pressure.", food > 0, "no food stored"),
+		_affordance("eat", "Use food as survival support when any is stored.", food > 0, "no food stored"),
+		_affordance("rest", "Rest at the bed to recover HP, stamina, and fear.", true),
+		_affordance("reflect_library", "Go to the library to turn recent events into a lesson.", _get_meaningful_event_count() > 0, "no fresh meaningful event"),
+		_affordance("repair", "Repair a damaged structure.", damaged_count > 0, "nothing is damaged"),
+		_affordance("flee", "Move away from immediate danger.", true),
+		_affordance("kite", "Keep distance while danger approaches.", true),
+		_affordance("hide", "Stay near safer cover and avoid direct contact.", has_wall or has_aura or has_tower, "no safe place exists"),
+		_affordance("fight", "Accept direct combat if avoidance fails.", true),
+		_affordance("build_storm_rod", "Build a Storm Rod as an anti-flying sky defense.", stone >= int(_get_storm_rod_cost().get("stone", 0)), "not enough stone"),
+		_affordance("anti_flying", "Prioritize answers that work against flying enemies.", true),
+		_affordance("sky_answer", "Treat the sky as the threat and prefer storm or range over walls alone.", true),
+		_affordance("build_spike_trap", "Spend stone to build a spike trap that punishes enemies on the ground.", stone >= int(_get_spike_trap_cost().get("stone", 0)), "not enough stone"),
+		_affordance("build_tar_pit", "Spend stone to build a tar pit that slows enemies.", stone >= int(_get_tar_pit_cost().get("stone", 0)), "not enough stone"),
+		_affordance("build_fear_lantern", "Spend stone to build a lantern that helps calm fear.", stone >= int(_get_fear_lantern_cost().get("stone", 0)), "not enough stone"),
+		_affordance("build_decoy_idol", "Spend stone to build a decoy that pulls enemies away.", stone >= int(_get_decoy_idol_cost().get("stone", 0)), "not enough stone"),
+		_affordance("build_thorn_totem", "Spend stone to build thorns that punish contact.", stone >= int(_get_thorn_totem_cost().get("stone", 0)), "not enough stone"),
+		_affordance("build_repair_bench", "Spend stone to build repair support for damaged defenses.", stone >= int(_get_repair_bench_cost().get("stone", 0)), "not enough stone"),
+		_affordance("use_thorns", "Lean on thorn defenses to punish enemies that touch Ari's protection.", thorn_totems.size() > 0, "no thorns exist"),
+	]
+
+
+func _affordance(id: String, description: String, available: bool, reason_unavailable := "") -> Dictionary:
+	var result := {
+		"id": id,
+		"description": description,
+		"available": available,
+	}
+	if not available and reason_unavailable != "":
+		result["reason_unavailable"] = reason_unavailable
+	return result
+
+
+func _recent_ai_thoughts() -> Array[String]:
+	var thoughts: Array[String] = []
+	if latest_thought.strip_edges() != "":
+		thoughts.append(latest_thought)
+	return thoughts
+
+
+func _latest_library_note_text() -> String:
+	var note := _get_latest_lifetime_note()
+	if note.is_empty():
+		return ""
+	return str(note.get("markdown", note.get("markdown_text", note.get("hypothesis", "")))).substr(0, 1000)
+
+
+func _normalize_grounded_plan(raw_plan) -> Array:
+	var result := []
+	var seen := {}
+	if typeof(raw_plan) != TYPE_ARRAY:
+		return result
+	for raw_item in raw_plan:
+		if typeof(raw_item) != TYPE_DICTIONARY:
+			continue
+		var affordance_id := str(raw_item.get("affordance_id", raw_item.get("id", ""))).strip_edges()
+		if affordance_id == "" or seen.has(affordance_id):
+			continue
+		var priority := clampf(float(raw_item.get("priority", 0.0)), 0.0, 1.0)
+		if priority <= 0.0:
+			continue
+		result.append({
+			"affordance_id": affordance_id,
+			"priority": priority,
+			"reason": _limit_inline(str(raw_item.get("reason", "")), 180),
+		})
+		seen[affordance_id] = true
+		if result.size() >= 4:
+			break
+	return result
+
+
+func _priority_hints_from_grounded_plan(grounded_plan: Array) -> Dictionary:
+	var hints := {}
+	for item in grounded_plan:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		_set_hint_max(hints, str(item.get("affordance_id", "")), float(item.get("priority", 0.0)))
+	return hints
+
+
+func _get_top_grounded_plan_item() -> Dictionary:
+	var best := {}
+	var best_priority := 0.0
+	for item in sign_grounded_plan:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var priority := clampf(float(item.get("priority", 0.0)), 0.0, 1.0)
+		if priority > best_priority:
+			best = item
+			best_priority = priority
+	return best if best_priority >= 0.15 else {}
+
+
+func _get_top_grounded_plan_text() -> String:
+	var top_plan := _get_top_grounded_plan_item()
+	if top_plan.is_empty():
+		return ""
+	var affordance_id := str(top_plan.get("affordance_id", ""))
+	var reason := str(top_plan.get("reason", "")).strip_edges()
+	if reason == "":
+		return _affordance_label(affordance_id)
+	return "%s: %s" % [_affordance_label(affordance_id), _limit_inline(reason, 70)]
+
+
+func _job_matches_affordance(job: String, affordance_id: String) -> bool:
+	if job == affordance_id:
+		return true
+	match affordance_id:
+		"use_existing_wall", "wait_behind_wall", "use_cover", "hide":
+			return job == "use_cover" or job == "wait_or_idle"
+		"lure_to_aura":
+			return job == "lure_to_aura"
+		"use_tower", "ranged_attack", "train_bow":
+			return job == "use_tower" or job == "build_bow_tower"
+		"build_tower":
+			return job == "build_bow_tower"
+		"build_storm_rod", "anti_flying", "sky_answer":
+			return job == "build_storm_rod" or job == "mine_stone"
+		"eat", "eat_food":
+			return job == "eat_food" or job == "farm_food"
+		"prepare_weapon", "fight":
+			return job == "train_combat"
+		"repair":
+			return job == "repair_structure"
+		"build_spike_trap":
+			return job == "build_spike_trap"
+	return false
+
+
+func _affordance_label(affordance_id: String) -> String:
+	match affordance_id:
+		"use_existing_wall", "wait_behind_wall", "use_cover":
+			return "cover"
+		"lure_to_aura", "place_aura_orb":
+			return "light"
+		"use_tower", "build_tower", "ranged_attack", "train_bow":
+			return "tower range"
+		"build_storm_rod", "anti_flying", "sky_answer":
+			return "sky answer"
+		"farm_food", "eat", "eat_food":
+			return "food"
+		"reflect_library":
+			return "library"
+		"train_combat", "prepare_weapon", "fight":
+			return "combat"
+		"build_spike_trap", "build_trap":
+			return "traps"
+	return affordance_id.replace("_", " ")
+
+
+func _limit_inline(text: String, max_length: int) -> String:
+	var clean_text := text.replace("\n", " ").strip_edges()
+	if clean_text.length() <= max_length:
+		return clean_text
+	return clean_text.substr(0, max_length - 3).strip_edges() + "..."
 
 
 func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
@@ -2753,11 +3059,26 @@ func _normalize_ai_priority_hints(raw_hints) -> Dictionary:
 		maxf(float(normalized.get("wait_behind_wall", 0.0)), float(normalized.get("use_cover", 0.0)))
 	))
 	_set_hint_max(normalized, "repair_structure", float(normalized.get("repair", 0.0)))
+	_set_hint_max(normalized, "build_trap", float(normalized.get("build_spike_trap", 0.0)))
 	_set_hint_max(normalized, "range", maxf(
 		maxf(float(normalized.get("kite", 0.0)), float(normalized.get("flee", 0.0))),
 		maxf(float(normalized.get("train_bow", 0.0)), float(normalized.get("ranged_attack", 0.0)))
 	))
+	_set_hint_max(normalized, "build_storm_rod", maxf(
+		float(normalized.get("build_storm_rod", 0.0)),
+		maxf(float(normalized.get("anti_flying", 0.0)), float(normalized.get("sky_answer", 0.0)))
+	))
 	return normalized
+
+
+func _merge_priority_hints(local_hints, plan_hints = {}, ai_hints = {}) -> Dictionary:
+	var merged := {}
+	for source in [local_hints, plan_hints, ai_hints]:
+		if typeof(source) != TYPE_DICTIONARY:
+			continue
+		for raw_key in source.keys():
+			_set_hint_max(merged, str(raw_key), float(source[raw_key]))
+	return _normalize_ai_priority_hints(merged)
 
 
 func _set_hint_max(hints: Dictionary, key: String, value: float) -> void:
@@ -2828,7 +3149,8 @@ func _show_ari_thought(thought: String, force := false) -> void:
 	if clean_thought == "":
 		return
 	latest_thought = clean_thought
-	thought_bubble.call("show_thought", clean_thought, force)
+	if thought_bubble != null:
+		thought_bubble.call("show_thought", clean_thought, force)
 
 
 func _reset_survival_pressure_flags() -> void:
@@ -2907,6 +3229,8 @@ func _reinterpret_current_sign() -> void:
 	var interpretation: Dictionary = sign_mind.call("interpret_sign", sign_text, personality_traits, _get_run_build_context())
 	sign_interpretation = str(interpretation.get("interpretation_text", "Ari can read the words, but not a useful plan yet."))
 	ai_survival_theory = ""
+	ai_emotion = ""
+	sign_grounded_plan = []
 	var hints = interpretation.get("priority_hints", {})
 	sign_priority_hints = hints.duplicate(true) if typeof(hints) == TYPE_DICTIONARY else {}
 	var effects := _get_run_build_effects()

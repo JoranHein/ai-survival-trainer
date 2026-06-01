@@ -29,28 +29,43 @@
       "attack_range": 28.0,
       "attack_cooldown_seconds": 1.25,
       "structure_attack_damage": 22.0
+    },
+    "flying": {
+      "display_name": "Flying Beast",
+      "max_hp": 28.0,
+      "speed": 96.0,
+      "radius": 11.0,
+      "attack_damage": 11.0,
+      "attack_range": 24.0,
+      "attack_cooldown_seconds": 0.95,
+      "structure_attack_damage": 2.0,
+      "ignores_walls": true
     }
   },
   "waves": [
     {
       "from_day": 1,
       "runner_chance": 0.0,
-      "brute_chance": 0.0
+      "brute_chance": 0.0,
+      "flying_chance": 0.0
     },
     {
       "from_day": 2,
       "runner_chance": 0.25,
-      "brute_chance": 0.0
+      "brute_chance": 0.0,
+      "flying_chance": 0.0
     },
     {
       "from_day": 3,
       "runner_chance": 0.28,
-      "brute_chance": 0.12
+      "brute_chance": 0.12,
+      "flying_chance": 0.0
     },
     {
       "from_day": 5,
-      "runner_chance": 0.35,
-      "brute_chance": 0.18
+      "runner_chance": 0.34,
+      "brute_chance": 0.18,
+      "flying_chance": 0.12
     }
   ]
 }

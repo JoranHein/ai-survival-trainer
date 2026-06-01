@@ -22,7 +22,7 @@ class Settings:
     model_base_url: str = os.getenv("MODEL_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
     fast_model: str = os.getenv("FAST_MODEL", os.getenv("MODEL_NAME", "qwen3:1.7b"))
     deep_model: str = os.getenv("DEEP_MODEL", os.getenv("MODEL_NAME", "qwen3:1.7b"))
-    request_timeout_seconds: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "6"))
+    request_timeout_seconds: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "60"))
     debug_log_signs: bool = os.getenv("DEBUG_LOG_SIGNS", "false").lower() == "true"
 
 
@@ -38,7 +38,7 @@ async def call_deep_model(request: DeepInterpretationRequest, settings: Settings
             model=settings.deep_model,
             system_prompt=DEEP_SYSTEM_PROMPT,
             user_prompt=deep_user_prompt(request),
-            max_tokens=320,
+            max_tokens=360,
         )
         logger.info("deep_interpretation model=success latency_ms=%d", int((time.perf_counter() - start) * 1000))
         return raw

@@ -15,6 +15,7 @@ const AriMindScript = preload("res://scripts/ari/AriMind.gd")
 const SignMindScript = preload("res://scripts/ari/SignMind.gd")
 const EnemyControllerScript = preload("res://scripts/enemies/EnemyController.gd")
 const WaveDirectorScript = preload("res://scripts/world/WaveDirector.gd")
+const WorldScript = preload("res://scripts/world/World.gd")
 
 var failures: Array[String] = []
 
@@ -30,12 +31,16 @@ func _run() -> void:
 
 	await _test_bridge_health_and_raw_validation(bridge)
 	_test_deep_interpretation_contract(bridge)
+	_test_ai_latency_cache_v1_contract(bridge)
+	await _test_world_ai_latency_commit_contract()
 	_test_local_combat_signs()
 	_test_local_tower_range_signs()
+	_test_local_flying_storm_signs()
 	_test_farming_hunger_rest_behavior()
 	_test_library_reflection_v1_contract()
+	_test_permanent_upgrades_v1_contract()
 	_test_enemy_variety_stats()
-	_test_wave_director_escalates_without_flying()
+	_test_wave_director_escalates_with_flying()
 	_test_ai_tactical_priority_jobs()
 	_test_memory_records_events()
 	_test_chronicle_validates_scribe_notes()
@@ -102,12 +107,39 @@ func _test_deep_interpretation_contract(bridge: AIBridge) -> void:
 		"interpretation": long_interpretation,
 		"thought": long_thought,
 		"survival_theory": "cover",
+		"emotion": "focused fear",
+		"grounded_plan": [
+			{
+				"affordance_id": "use_existing_wall",
+				"priority": 2.0,
+				"reason": "The wall already exists, so cover matters more than building.",
+			},
+			{
+				"affordance_id": "build_storm_rod",
+				"priority": "0.8",
+				"reason": "Wings need a sky answer.",
+			},
+			{
+				"affordance_id": "unknown_spell",
+				"priority": 1.0,
+				"reason": "Unknown model affordances should be ignored.",
+			},
+		],
 		"priority_hints": {
 			"build_wall": 2.0,
 			"wait_behind_wall": "0.7",
 			"lure_to_aura": 0.8,
 			"repair": 0.4,
 			"kite": 1.5,
+			"prepare_weapon": 0.5,
+			"ranged_attack": 2.0,
+			"use_tower": 0.9,
+			"train_bow": "0.6",
+			"eat": 0.3,
+			"eat_food": 0.4,
+			"build_storm_rod": 0.45,
+			"anti_flying": 1.4,
+			"sky_answer": 0.8,
 			"unknown_key": 1.0,
 		},
 		"sign_strength": -5.0,
@@ -117,22 +149,204 @@ func _test_deep_interpretation_contract(bridge: AIBridge) -> void:
 	_assert(response.get("ok", false), "deep interpretation should report successful remote validation")
 	_assert(str(response.get("interpretation", "")).length() == 240, "deep interpretation text should be capped")
 	_assert(str(response.get("thought", "")).length() == 160, "deep thought text should be capped")
+	_assert(response.get("emotion", "") == "focused fear", "deep response should preserve Ari emotion")
+	var grounded_plan: Array = response.get("grounded_plan", [])
+	_assert(grounded_plan.size() == 2, "deep grounded plan should keep known affordances and ignore unknown ones")
+	if grounded_plan.size() >= 2:
+		_assert(grounded_plan[0].get("affordance_id", "") == "use_existing_wall", "first grounded plan item should keep affordance id")
+		_assert(grounded_plan[0].get("priority", 0.0) == 1.0, "grounded plan priority should be clamped")
+		_assert(grounded_plan[1].get("affordance_id", "") == "build_storm_rod", "storm plan item should be preserved")
+		_assert(grounded_plan[1].get("priority", 0.0) == 0.8, "grounded plan should accept numeric strings")
 	var hints: Dictionary = response.get("priority_hints", {})
 	_assert(hints.get("build_wall", 0.0) == 1.0, "deep build_wall hint should be clamped")
 	_assert(hints.get("wait_behind_wall", 0.0) == 0.7, "deep wait_behind_wall hint should accept numeric strings")
 	_assert(hints.get("lure_to_aura", 0.0) == 0.8, "deep lure_to_aura hint should be preserved")
 	_assert(hints.get("repair", 0.0) == 0.4, "deep repair hint should be preserved")
 	_assert(hints.get("kite", 0.0) == 1.0, "deep kite hint should be clamped")
+	_assert(hints.get("prepare_weapon", 0.0) == 0.5, "deep prepare_weapon hint should be preserved")
+	_assert(hints.get("ranged_attack", 0.0) == 1.0, "deep ranged_attack hint should be clamped")
+	_assert(hints.get("use_tower", 0.0) == 0.9, "deep use_tower hint should be preserved")
+	_assert(hints.get("train_bow", 0.0) == 0.6, "deep train_bow hint should accept numeric strings")
+	_assert(hints.get("eat", 0.0) == 0.3, "deep eat hint should be preserved")
+	_assert(hints.get("eat_food", 0.0) == 0.4, "deep eat_food hint should be preserved")
+	_assert(hints.get("build_storm_rod", 0.0) == 0.8, "deep build_storm_rod hint should include grounded plan priority")
+	_assert(hints.get("anti_flying", 0.0) == 1.0, "deep anti_flying hint should be clamped")
+	_assert(hints.get("sky_answer", 0.0) == 0.8, "deep sky_answer hint should be preserved")
 	_assert(not hints.has("unknown_key"), "deep priority hints should remove unknown keys")
 	_assert(response.get("sign_strength", 1.0) == 0.0, "deep sign strength should clamp low values")
 	_assert(response.get("resonance", 0.0) == 1.0, "deep resonance should clamp high values")
 
 	var fallback := bridge._deep_fallback(payload, "disabled")
 	var fallback_hints: Dictionary = fallback.get("priority_hints", {})
+	var fallback_plan: Array = fallback.get("grounded_plan", [])
 	_assert(not fallback.get("ok", true), "deep fallback should report unsuccessful remote use")
 	_assert(fallback.get("source", "") == "disabled", "deep fallback should preserve source")
 	_assert(fallback_hints.get("build_wall", 0.0) == 0.4, "deep fallback should translate local wall hint")
 	_assert(fallback_hints.get("wait_or_idle", 0.0) == 0.2, "deep fallback should translate local defensive wait hint")
+	_assert(fallback_plan.size() > 0 and fallback_plan[0].get("affordance_id", "") == "build_wall", "deep fallback should expose a grounded plan from local hints")
+
+
+func _test_ai_latency_cache_v1_contract(bridge: AIBridge) -> void:
+	_assert(bridge.has_method("clear_deep_interpretation_cache"), "AIBridge should expose a way to clear the in-memory deep interpretation cache")
+	_assert(bridge.has_method("_deep_cache_key"), "AIBridge should build a stable deep interpretation cache key")
+	_assert(bridge.has_method("_store_deep_interpretation_cache"), "AIBridge should store valid deep interpretations")
+	_assert(bridge.has_method("_cached_deep_interpretation"), "AIBridge should return cached deep interpretations")
+	if not bridge.has_method("clear_deep_interpretation_cache") or not bridge.has_method("_deep_cache_key") or not bridge.has_method("_store_deep_interpretation_cache") or not bridge.has_method("_cached_deep_interpretation"):
+		return
+	bridge.call("clear_deep_interpretation_cache")
+	var payload := {
+		"sign_text": "  Stand   behind the WALL  ",
+		"world": {
+			"phase": "midday",
+			"wall_count": 1,
+			"aura_orb_count": 0,
+			"bow_tower_count": 0,
+			"storm_rod_count": 0,
+			"enemy_type_counts": {"flying": 1},
+			"structures": [{"type": "wall", "status": "intact"}],
+		},
+		"current_affordances": [
+			{"id": "use_existing_wall", "available": true},
+			{"id": "build_storm_rod", "available": true},
+		],
+		"local_fallback": {
+			"interpretation": "Ari locally reads the wall as cover.",
+			"thought": "The wall may help.",
+			"survival_theory": "local_cover",
+			"priority_hints": {
+				"use_existing_wall": 0.7,
+			},
+			"grounded_plan": [{
+				"affordance_id": "use_existing_wall",
+				"priority": 0.7,
+				"reason": "The local sign reading points to the existing wall.",
+			}],
+			"sign_strength": 0.6,
+			"resonance": 0.55,
+		},
+	}
+	var similar_payload := payload.duplicate(true)
+	similar_payload["sign_text"] = "stand behind the wall"
+	var changed_context := payload.duplicate(true)
+	changed_context["world"]["wall_count"] = 0
+
+	_assert(bridge.call("_deep_cache_key", payload) == bridge.call("_deep_cache_key", similar_payload), "deep cache should treat whitespace/case-only sign edits as the same key")
+	_assert(bridge.call("_deep_cache_key", payload) != bridge.call("_deep_cache_key", changed_context), "deep cache key should include compact world context")
+
+	var remote_result := bridge._validate_deep_interpretation({
+		"interpretation": "Remote says the wall is useful cover while wings need a sky answer.",
+		"thought": "The sign is deeper than it looks, but I see the wall and the sky now.",
+		"survival_theory": "cover_and_sky",
+		"priority_hints": {
+			"use_existing_wall": 0.8,
+			"build_storm_rod": 0.7,
+			"unknown_key": 1.0,
+		},
+		"grounded_plan": [{
+			"affordance_id": "build_storm_rod",
+			"priority": 0.7,
+			"reason": "Flying enemies bypass walls, so storm support answers the sky.",
+		}],
+		"sign_strength": 0.9,
+		"resonance": 0.85,
+	}, payload, true, "remote_server")
+	bridge.call("_store_deep_interpretation_cache", payload, remote_result)
+	var cached: Dictionary = bridge.call("_cached_deep_interpretation", similar_payload)
+	_assert(cached.get("ok", false), "deep cache should return a valid cached interpretation")
+	_assert(cached.get("source", "") == "cache", "deep cache should mark cached results")
+	_assert(bool(cached.get("cached", false)), "deep cache should expose cached status")
+	_assert(cached.get("interpretation", "") == remote_result.get("interpretation", ""), "deep cache should preserve the remote interpretation")
+	_assert(cached.get("priority_hints", {}).get("build_storm_rod", 0.0) == 0.7, "deep cache should preserve validated priority hints")
+
+	bridge.force_provider_mode("remote_server")
+	var cached_request_state := {"done": false, "result": {}}
+	bridge.request_deep_interpretation(similar_payload, func(result: Dictionary) -> void:
+		cached_request_state["done"] = true
+		cached_request_state["result"] = result
+	)
+	_assert(cached_request_state["done"], "request_deep_interpretation should return cached results immediately")
+	_assert(cached_request_state["result"].get("source", "") == "cache", "request_deep_interpretation should use cache before the network")
+	bridge.force_provider_mode("local_stub")
+
+	var failed := bridge._parse_deep_interpretation_response(payload, HTTPRequest.RESULT_TIMEOUT, 0, PackedByteArray())
+	_assert(not failed.get("ok", true), "failed remote deep interpretation should report fallback")
+	_assert(failed.get("source", "") == "request_failed", "failed remote deep interpretation should preserve failure source")
+	_assert(failed.get("interpretation", "") == "Ari locally reads the wall as cover.", "failed remote deep interpretation should keep local interpretation")
+
+	var world: World = WorldScript.new()
+	_assert(world.has_method("_begin_ai_waiting"), "World should begin visible remote-AI thinking state")
+	_assert(world.has_method("_advance_ai_waiting"), "World should advance visible remote-AI thinking state")
+	_assert(world.has_method("_finish_ai_waiting"), "World should finish visible remote-AI thinking state")
+	if not world.has_method("_begin_ai_waiting") or not world.has_method("_advance_ai_waiting") or not world.has_method("_finish_ai_waiting"):
+		world.free()
+		return
+	world.call("_begin_ai_waiting")
+	_assert(str(world.get("ai_status")).begins_with("AI: thinking"), "world should expose an AI thinking status while remote interpretation is pending")
+	_assert(str(world.get("latest_thought")).contains("deeper than it looks"), "world should show a diegetic waiting thought")
+	world.call("_advance_ai_waiting", 18.0)
+	_assert(str(world.get("ai_status")).contains("still thinking"), "world should expose still-thinking status for slow remote interpretation")
+	world.call("_finish_ai_waiting")
+	_assert(not bool(world.get("_ai_waiting_active")), "world should stop pending state when remote interpretation resolves")
+	world.free()
+
+
+func _test_world_ai_latency_commit_contract() -> void:
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should be loadable for AI latency integration checks")
+	if world_scene == null:
+		return
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	var bridge: AIBridge = world.get("ai_bridge")
+	if bridge != null:
+		bridge.force_provider_mode("local_stub")
+
+	world.commit_sign("stand behind the wall")
+	var local_interpretation := str(world.get("sign_interpretation"))
+	var local_hints: Dictionary = world.get("sign_priority_hints")
+	_assert(local_interpretation != "" and local_interpretation != "No sign yet.", "committing a sign should apply local SignMind interpretation immediately")
+	_assert(float(local_hints.get("use_existing_wall", 0.0)) > 0.0 or float(local_hints.get("defensive_wait", 0.0)) > 0.0 or float(local_hints.get("wall", 0.0)) > 0.0, "local fallback should immediately provide executable cover/wall priority")
+	_assert(str(world.get("ai_status")) == "AI disabled", "AI-disabled commits should keep gameplay on local fallback")
+
+	world.call("_begin_ai_waiting")
+	var request_id := int(world.get("_ai_sign_request_id"))
+	world.call("_on_ai_deep_interpretation_response", request_id, {
+		"ok": true,
+		"source": "remote_server",
+		"interpretation": "Remote reads the wall as cover and gives Ari a calmer plan.",
+		"thought": "The wall is not the whole answer, but it buys me time.",
+		"survival_theory": "remote_cover",
+		"emotion": "careful focus",
+		"grounded_plan": [{
+			"affordance_id": "use_existing_wall",
+			"priority": 0.9,
+			"reason": "The sign says to stand behind the existing wall.",
+		}],
+		"priority_hints": {
+			"use_existing_wall": 0.9,
+			"use_cover": 0.8,
+		},
+		"sign_strength": 0.82,
+		"resonance": 0.76,
+	})
+	_assert(str(world.get("sign_interpretation")).begins_with("Remote reads"), "valid remote response should replace the displayed interpretation")
+	_assert(float(world.get("sign_priority_hints").get("use_existing_wall", 0.0)) >= 0.9, "valid remote response should enhance priorities")
+	_assert(str(world.get("ai_status")) == "AI: active", "valid remote response should leave AI active")
+	_assert(str(world.get("latest_thought")).contains("buys me time"), "valid remote response should show Ari's AI thought")
+
+	var remote_interpretation := str(world.get("sign_interpretation"))
+	world.call("_begin_ai_waiting")
+	world.call("_on_ai_deep_interpretation_response", request_id, {
+		"ok": false,
+		"source": "request_failed",
+	})
+	_assert(str(world.get("sign_interpretation")) == remote_interpretation, "failed remote response should not erase the current interpretation")
+	_assert(str(world.get("ai_status")) == "AI: failed/fallback", "failed remote response should expose fallback status")
+
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
 
 
 func _test_ai_tactical_priority_jobs() -> void:
@@ -230,6 +444,33 @@ func _test_ai_tactical_priority_jobs() -> void:
 		},
 	}))
 	_assert(brute_pressure_decision.get("job", "") == "use_tower" or brute_pressure_decision.get("job", "") == "lure_to_aura", "brute pressure should prefer damage over adding weak walls")
+
+	for sky_case in [
+		{"key": "build_storm_rod", "label": "build_storm_rod"},
+		{"key": "anti_flying", "label": "anti_flying"},
+		{"key": "sky_answer", "label": "sky_answer"},
+	]:
+		var storm_decision := ari_mind.choose_daytime_job(_base_mind_context({
+			"wall_count": 2,
+			"aura_orb_count": 1,
+			"storm_rod_count": 0,
+			"priority_hints": {
+				str(sky_case.get("key", "")): 0.9,
+			},
+		}))
+		_assert(storm_decision.get("job", "") == "build_storm_rod", "%s hint should make Ari build a Storm Rod after basic defenses exist" % str(sky_case.get("label", "")))
+		_assert(str(storm_decision.get("reason", "")).to_lower().contains("sky") or str(storm_decision.get("reason", "")).to_lower().contains("anti-air"), "%s storm reason should explain the sky threat" % str(sky_case.get("label", "")))
+
+	var flying_pressure_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 2,
+		"aura_orb_count": 1,
+		"bow_tower_count": 1,
+		"storm_rod_count": 0,
+		"enemy_type_counts": {
+			"flying": 1,
+		},
+	}))
+	_assert(flying_pressure_decision.get("job", "") == "build_storm_rod", "seen flying enemies should push Ari toward Storm Rod support")
 
 	_assert(ari_mind.has_method("choose_night_tactic"), "AriMind should choose tactical night behavior")
 	if not ari_mind.has_method("choose_night_tactic"):
@@ -341,6 +582,20 @@ func _test_local_tower_range_signs() -> void:
 		var interpretation := sign_mind.interpret_sign(sign_text)
 		var hints: Dictionary = interpretation.get("priority_hints", {})
 		_assert(float(hints.get("range", 0.0)) > 0.0 or float(hints.get("build_tower", 0.0)) > 0.0, "local SignMind should read '%s' as range or tower intent" % sign_text)
+	sign_mind.free()
+
+
+func _test_local_flying_storm_signs() -> void:
+	var sign_mind: SignMind = SignMindScript.new()
+	for sign_text in [
+		"the wings come from above",
+		"build a storm rod for the sky",
+		"lightning should answer flying teeth",
+		"air danger needs thunder",
+	]:
+		var interpretation := sign_mind.interpret_sign(sign_text)
+		var hints: Dictionary = interpretation.get("priority_hints", {})
+		_assert(float(hints.get("build_storm_rod", 0.0)) > 0.0, "local SignMind should read '%s' as Storm Rod intent" % sign_text)
 	sign_mind.free()
 
 
@@ -471,6 +726,88 @@ func _test_library_reflection_v1_contract() -> void:
 	ari_mind.free()
 
 
+func _test_permanent_upgrades_v1_contract() -> void:
+	_assert(ResourceLoader.exists("res://scripts/progression/PermanentUpgrades.gd"), "Permanent Upgrades v1 should expose scripts/progression/PermanentUpgrades.gd")
+	_assert(ResourceLoader.exists("res://data/permanent_upgrades.json"), "Permanent Upgrades v1 should use data/permanent_upgrades.json")
+	var script = load("res://scripts/progression/PermanentUpgrades.gd")
+	if script == null:
+		return
+	var save_path := "user://permanent_upgrades_test.json"
+	var absolute_save_path := ProjectSettings.globalize_path(save_path)
+	if FileAccess.file_exists(save_path):
+		DirAccess.remove_absolute(absolute_save_path)
+	var progression = script.new()
+	progression.set("save_path", save_path)
+	_assert(progression.has_method("get_state"), "PermanentUpgrades should expose progression state")
+	_assert(progression.has_method("advance_survival"), "PermanentUpgrades should award Time Points while Ari lives")
+	_assert(progression.has_method("reset_run"), "PermanentUpgrades should support run reset without wiping progression")
+	_assert(progression.has_method("buy_upgrade"), "PermanentUpgrades should let the player buy upgrades")
+	_assert(progression.has_method("grant_time_points"), "PermanentUpgrades should support controlled Time Point grants")
+	_assert(progression.has_method("save_now") and progression.has_method("load_now"), "PermanentUpgrades should save/load user JSON")
+	if not progression.has_method("get_state") or not progression.has_method("buy_upgrade"):
+		return
+
+	var state: Dictionary = progression.call("get_state")
+	var rows: Array = state.get("upgrade_rows", [])
+	var ids := []
+	for row in rows:
+		if typeof(row) == TYPE_DICTIONARY:
+			ids.append(str(row.get("id", "")))
+	for required_id in [
+		"max_hp",
+		"base_damage",
+		"defense",
+		"mining_efficiency",
+		"building_efficiency",
+		"farming_yield",
+		"warding_power",
+		"regeneration",
+		"movement_speed_small",
+		"sign_understanding",
+	]:
+		_assert(ids.has(required_id), "PermanentUpgrades should define %s" % required_id)
+
+	progression.set("seconds_per_time_point", 1.0)
+	progression.call("advance_survival", 3.0, false, true)
+	var earned_points := int(progression.call("get_state").get("time_points", 0))
+	_assert(earned_points >= 1, "Time Points should increase while Ari is alive")
+	progression.call("advance_survival", 3.0, false, true)
+	var longer_survival_points := int(progression.call("get_state").get("time_points", 0))
+	_assert(longer_survival_points > earned_points, "surviving longer should give more Time Points")
+	progression.call("advance_survival", 5.0, false, false)
+	_assert(int(progression.call("get_state").get("time_points", 0)) == longer_survival_points, "Time Points should not increase after Ari dies")
+	progression.call("reset_run")
+	_assert(int(progression.call("get_state").get("time_points", 0)) == longer_survival_points, "run reset should keep Time Points")
+
+	progression.call("grant_time_points", 200)
+	for upgrade_id in ids:
+		progression.call("buy_upgrade", upgrade_id)
+	var effects: Dictionary = progression.call("get_effects")
+	_assert(float(effects.get("max_hp_bonus", 0.0)) > 0.0, "max_hp should increase Ari max HP")
+	_assert(float(effects.get("base_damage_multiplier", 1.0)) > 1.0, "base_damage should improve damage")
+	_assert(float(effects.get("damage_taken_multiplier", 1.0)) < 1.0, "defense should reduce incoming damage")
+	_assert(float(effects.get("mining_speed_multiplier", 1.0)) > 1.0, "mining_efficiency should improve mining")
+	_assert(float(effects.get("stone_cost_multiplier", 1.0)) < 1.0, "building_efficiency should reduce build costs")
+	_assert(float(effects.get("farming_yield_multiplier", 1.0)) > 1.0 or float(effects.get("farming_speed_multiplier", 1.0)) > 1.0, "farming_yield should improve food production")
+	_assert(float(effects.get("aura_damage_multiplier", 1.0)) > 1.0, "warding_power should improve aura damage")
+	_assert(float(effects.get("rest_recovery_multiplier", 1.0)) > 1.0, "regeneration should improve rest recovery")
+	_assert(float(effects.get("movement_speed_multiplier", 1.0)) > 1.0, "movement_speed_small should improve movement")
+	_assert(float(effects.get("movement_speed_multiplier", 1.0)) <= 1.12, "movement_speed_small should stay capped")
+	_assert(float(effects.get("sign_strength_bonus", 0.0)) > 0.0, "sign_understanding should improve local sign reading")
+
+	progression.call("save_now")
+	var loaded = script.new()
+	loaded.set("save_path", save_path)
+	loaded.call("load_now")
+	var loaded_state: Dictionary = loaded.call("get_state")
+	_assert(int(loaded_state.get("time_points", 0)) == int(progression.call("get_state").get("time_points", 0)), "saved Time Points should load")
+	var loaded_upgrades: Dictionary = loaded_state.get("upgrades", {})
+	_assert(int(loaded_upgrades.get("max_hp", 0)) >= 1, "saved upgrade levels should load")
+	progression.free()
+	loaded.free()
+	DirAccess.remove_absolute(absolute_save_path)
+
+
 func _test_enemy_variety_stats() -> void:
 	var zombie: EnemyController = EnemyControllerScript.new()
 	zombie.configure_type("zombie")
@@ -478,6 +815,8 @@ func _test_enemy_variety_stats() -> void:
 	runner.configure_type("runner")
 	var brute: EnemyController = EnemyControllerScript.new()
 	brute.configure_type("brute")
+	var flying: EnemyController = EnemyControllerScript.new()
+	flying.configure_type("flying")
 
 	_assert(float(runner.get("speed")) > float(zombie.get("speed")), "runner should be faster than zombie")
 	_assert(float(runner.get("max_hp")) < float(zombie.get("max_hp")), "runner should have lower HP than zombie")
@@ -485,13 +824,19 @@ func _test_enemy_variety_stats() -> void:
 	_assert(float(brute.get("speed")) < float(zombie.get("speed")), "brute should be slower than zombie")
 	_assert(float(brute.get("max_hp")) > float(zombie.get("max_hp")), "brute should have higher HP than zombie")
 	_assert(float(brute.get("structure_attack_damage")) > float(zombie.get("structure_attack_damage")), "brute should have higher wall damage than zombie")
+	_assert(str(flying.get("enemy_type")) == "flying", "flying beast should keep the flying enemy type")
+	_assert(flying.get("ignores_walls") == true, "flying beast should ignore walls and ground blockers")
+	_assert(float(flying.get("max_hp")) < float(brute.get("max_hp")), "flying beast should have lower HP than brute")
+	_assert(float(flying.get("structure_attack_damage")) <= float(runner.get("structure_attack_damage")), "flying beast should not be a primary wall attacker")
+	_assert(ResourceLoader.exists("res://scenes/enemies/FlyingBeast.tscn"), "Flying Beast should have a readable scene resource")
 
 	zombie.free()
 	runner.free()
 	brute.free()
+	flying.free()
 
 
-func _test_wave_director_escalates_without_flying() -> void:
+func _test_wave_director_escalates_with_flying() -> void:
 	var director: WaveDirector = WaveDirectorScript.new()
 	_assert(director.has_method("choose_enemy_type_for_day"), "WaveDirector should expose deterministic enemy type choice")
 	if not director.has_method("choose_enemy_type_for_day"):
@@ -500,8 +845,7 @@ func _test_wave_director_escalates_without_flying() -> void:
 	_assert(director.call("choose_enemy_type_for_day", 1, 0.01) == "zombie", "day 1 should only spawn baseline zombies")
 	_assert(director.call("choose_enemy_type_for_day", 2, 0.10) == "runner", "day 2 should begin adding runners")
 	_assert(director.call("choose_enemy_type_for_day", 3, 0.05) == "brute", "day 3 should begin adding brutes")
-	for roll in [0.0, 0.08, 0.24, 0.55, 0.99]:
-		_assert(director.call("choose_enemy_type_for_day", 5, roll) != "flying", "Enemy Variety v1 should not spawn flying enemies")
+	_assert(director.call("choose_enemy_type_for_day", 5, 0.01) == "flying", "later nights should begin adding flying enemies")
 	director.free()
 
 

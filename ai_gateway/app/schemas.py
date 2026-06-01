@@ -11,21 +11,46 @@ ALLOWED_PRIORITY_KEYS = {
     "wait_or_idle",
     "use_existing_wall",
     "wait_behind_wall",
+    "use_cover",
     "place_aura_orb",
     "lure_to_aura",
     "train_combat",
+    "prepare_weapon",
+    "ranged_attack",
+    "use_tower",
+    "train_bow",
     "farm_food",
+    "eat",
+    "eat_food",
     "build_trap",
+    "build_spike_trap",
     "build_tower",
+    "build_tar_pit",
+    "build_fear_lantern",
+    "build_decoy_idol",
+    "build_thorn_totem",
+    "build_repair_bench",
+    "use_thorns",
     "rest",
     "reflect_library",
     "repair",
+    "repair_structure",
     "flee",
     "fight",
     "kite",
     "hide",
-    "use_cover",
+    "build_storm_rod",
+    "anti_flying",
+    "sky_answer",
+    "mining",
+    "wall",
+    "aura_orb",
+    "combat_training",
+    "range",
+    "defensive_wait",
 }
+
+MAX_GROUNDED_PLAN_ITEMS = 4
 
 
 class StrictModel(BaseModel):
@@ -56,13 +81,23 @@ class WorldState(StrictModel):
     wall_count: int = 0
     aura_orb_count: int = 0
     enemy_count: int = 0
+    enemy_type_counts: dict[str, int] = Field(default_factory=dict)
     known_enemy_types: list[str] = Field(default_factory=list)
     structures: list[StructureState] = Field(default_factory=list)
+
+
+class AffordanceState(StrictModel):
+    id: str
+    description: str = ""
+    available: bool = True
+    reason_unavailable: str = ""
 
 
 class LocalFallback(StrictModel):
     interpretation: str = ""
     priority_hints: dict[str, Any] = Field(default_factory=dict)
+    emotion: str = ""
+    grounded_plan: list[dict[str, Any]] = Field(default_factory=list)
     sign_strength: float = 0.0
     resonance: float = 0.0
 
@@ -72,12 +107,17 @@ class DeepInterpretationRequest(StrictModel):
     ari: AriState
     world: WorldState
     local_fallback: LocalFallback
+    current_affordances: list[AffordanceState] = Field(default_factory=list)
+    recent_thoughts: list[str] = Field(default_factory=list)
+    latest_library_note: str = ""
 
 
 class DeepInterpretationResponse(StrictModel):
     interpretation: str
     thought: str
     survival_theory: str
+    emotion: str
+    grounded_plan: list[dict[str, Any]]
     priority_hints: dict[str, float]
     sign_strength: float
     resonance: float
@@ -95,31 +135,52 @@ class FastThoughtResponse(StrictModel):
     resonance: float
 
 
-def sanitize_deep_response(raw: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+def sanitize_deep_response(
+    raw: dict[str, Any],
+    fallback: dict[str, Any],
+    allowed_affordance_ids: set[str] | None = None,
+) -> dict[str, Any]:
     raw_hints = raw.get("priority_hints", {})
     if not isinstance(raw_hints, dict):
         raw_hints = {}
+    priority_hints = sanitize_priority_hints(raw_hints)
+    grounded_plan = sanitize_grounded_plan(raw.get("grounded_plan", fallback.get("grounded_plan", [])), allowed_affordance_ids)
+    for item in grounded_plan:
+        affordance_id = item["affordance_id"]
+        priority_hints[affordance_id] = max(priority_hints.get(affordance_id, 0.0), item["priority"])
     return {
         "interpretation": clean_text(raw.get("interpretation", fallback.get("interpretation", "")), 240),
         "thought": clean_text(raw.get("thought", fallback.get("thought", "")), 160),
         "survival_theory": clean_text(raw.get("survival_theory", fallback.get("survival_theory", "fallback")), 64),
-        "priority_hints": sanitize_priority_hints(raw_hints),
+        "emotion": clean_text(raw.get("emotion", fallback.get("emotion", "uncertain")), 64),
+        "grounded_plan": grounded_plan,
+        "priority_hints": priority_hints,
         "sign_strength": clamp01(raw.get("sign_strength", fallback.get("sign_strength", 0.0))),
         "resonance": clamp01(raw.get("resonance", fallback.get("resonance", 0.0))),
     }
 
 
-def fallback_deep_response(local_fallback: LocalFallback | dict[str, Any]) -> dict[str, Any]:
+def fallback_deep_response(
+    local_fallback: LocalFallback | dict[str, Any],
+    current_affordances: list[AffordanceState] | list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if isinstance(local_fallback, LocalFallback):
         data = local_fallback.model_dump()
     else:
         data = local_fallback
     interpretation = clean_text(data.get("interpretation") or "Ari falls back to his local reading.", 240)
+    priority_hints = fallback_priority_hints(data.get("priority_hints", {}))
+    allowed_ids = affordance_ids(current_affordances)
     return {
         "interpretation": interpretation,
         "thought": "I only understand part of the sign. I will stay careful.",
         "survival_theory": "local_fallback",
-        "priority_hints": fallback_priority_hints(data.get("priority_hints", {})),
+        "emotion": clean_text(data.get("emotion", "uncertain"), 64),
+        "grounded_plan": sanitize_grounded_plan(
+            data.get("grounded_plan") or grounded_plan_from_hints(priority_hints, allowed_ids),
+            allowed_ids,
+        ),
+        "priority_hints": priority_hints,
         "sign_strength": clamp01(data.get("sign_strength", 0.0)),
         "resonance": clamp01(data.get("resonance", 0.0)),
     }
@@ -146,6 +207,7 @@ def fallback_priority_hints(raw_hints: dict[str, Any]) -> dict[str, float]:
         "defensive_wait": "wait_or_idle",
         "combat_training": "train_combat",
         "repair_structure": "repair",
+        "build_spike_trap": "build_trap",
     }
     translated: dict[str, Any] = {}
     for key, value in raw_hints.items():
@@ -155,6 +217,64 @@ def fallback_priority_hints(raw_hints: dict[str, Any]) -> dict[str, float]:
 
 def sanitize_priority_hints(raw_hints: dict[str, Any]) -> dict[str, float]:
     return {key: clamp01(raw_hints.get(key, 0.0)) for key in sorted(ALLOWED_PRIORITY_KEYS)}
+
+
+def sanitize_grounded_plan(raw_plan: Any, allowed_affordance_ids: set[str] | None = None) -> list[dict[str, Any]]:
+    if not isinstance(raw_plan, list):
+        return []
+    allowed_ids = allowed_affordance_ids or ALLOWED_PRIORITY_KEYS
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_item in raw_plan:
+        if not isinstance(raw_item, dict):
+            continue
+        affordance_id = clean_text(raw_item.get("affordance_id", raw_item.get("id", "")), 80)
+        if affordance_id not in allowed_ids or affordance_id in seen:
+            continue
+        priority = clamp01(raw_item.get("priority", 0.0))
+        if priority <= 0.0:
+            continue
+        result.append(
+            {
+                "affordance_id": affordance_id,
+                "priority": priority,
+                "reason": clean_text(raw_item.get("reason", ""), 180),
+            }
+        )
+        seen.add(affordance_id)
+        if len(result) >= MAX_GROUNDED_PLAN_ITEMS:
+            break
+    return result
+
+
+def grounded_plan_from_hints(priority_hints: dict[str, float], allowed_affordance_ids: set[str] | None = None) -> list[dict[str, Any]]:
+    allowed_ids = allowed_affordance_ids or ALLOWED_PRIORITY_KEYS
+    items = [
+        (key, clamp01(value))
+        for key, value in priority_hints.items()
+        if key in allowed_ids and clamp01(value) > 0.0
+    ]
+    items.sort(key=lambda item: item[1], reverse=True)
+    return [
+        {
+            "affordance_id": key,
+            "priority": value,
+            "reason": "Local fallback made this the closest executable behavior.",
+        }
+        for key, value in items[:MAX_GROUNDED_PLAN_ITEMS]
+    ]
+
+
+def affordance_ids(current_affordances: list[AffordanceState] | list[dict[str, Any]] | None) -> set[str] | None:
+    if not current_affordances:
+        return None
+    ids: set[str] = set()
+    for item in current_affordances:
+        if isinstance(item, AffordanceState):
+            ids.add(item.id)
+        elif isinstance(item, dict):
+            ids.add(str(item.get("id", "")))
+    return ids or None
 
 
 def clean_text(value: Any, max_chars: int) -> str:

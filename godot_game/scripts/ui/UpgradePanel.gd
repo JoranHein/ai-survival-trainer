@@ -32,7 +32,7 @@ func update_state(state: Dictionary) -> void:
 	var best_day := int(progression.get("best_day", 1))
 	var rows := _upgrade_rows(progression)
 	title_label.text = "Permanent Upgrades"
-	summary_label.text = "TP %d  deaths %d  best day %d  |  U closes" % [time_points, deaths, best_day]
+	summary_label.text = "TP %d  deaths %d  best day %d  |  1-0 buys, U closes" % [time_points, deaths, best_day]
 	_clear_grid()
 	for row in rows:
 		grid.add_child(_make_upgrade_card(row))
@@ -191,7 +191,7 @@ func _badge_color(upgrade_id: String) -> Color:
 	match upgrade_id:
 		"max_hp":
 			return Color(0.78, 0.16, 0.22, 1.0)
-		"attack":
+		"base_damage":
 			return Color(0.92, 0.45, 0.14, 1.0)
 		"defense":
 			return Color(0.34, 0.50, 0.80, 1.0)
@@ -207,6 +207,8 @@ func _badge_color(upgrade_id: String) -> Color:
 			return Color(0.84, 0.66, 0.24, 1.0)
 		"regeneration":
 			return Color(0.36, 0.72, 0.58, 1.0)
+		"movement_speed_small":
+			return Color(0.42, 0.74, 0.82, 1.0)
 		"sign_understanding":
 			return Color(0.70, 0.42, 0.88, 1.0)
 	return Color(0.55, 0.55, 0.55, 1.0)

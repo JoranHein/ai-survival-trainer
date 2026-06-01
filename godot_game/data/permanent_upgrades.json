@@ -1,0 +1,107 @@
+{
+	"upgrade_order": [
+		"max_hp",
+		"base_damage",
+		"defense",
+		"mining_efficiency",
+		"building_efficiency",
+		"farming_yield",
+		"warding_power",
+		"regeneration",
+		"movement_speed_small",
+		"sign_understanding"
+	],
+	"upgrades": {
+		"max_hp": {
+			"label": "Max HP",
+			"role": "More life",
+			"tags": ["HP", "survive"],
+			"base_cost": 3,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 8.0
+		},
+		"base_damage": {
+			"label": "Base Damage",
+			"role": "Hit harder",
+			"tags": ["damage", "range"],
+			"base_cost": 3,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 0.04
+		},
+		"defense": {
+			"label": "Defense",
+			"role": "Take less",
+			"tags": ["armor", "survive"],
+			"base_cost": 3,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 0.025
+		},
+		"mining_efficiency": {
+			"label": "Mining",
+			"role": "Stone faster",
+			"tags": ["stone", "day"],
+			"base_cost": 2,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 0.045
+		},
+		"building_efficiency": {
+			"label": "Building",
+			"role": "Cheaper builds",
+			"tags": ["walls", "cost"],
+			"base_cost": 3,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 0.025
+		},
+		"farming_yield": {
+			"label": "Farming",
+			"role": "More food",
+			"tags": ["food", "calm"],
+			"base_cost": 2,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 0.055
+		},
+		"warding_power": {
+			"label": "Warding",
+			"role": "Stronger light",
+			"tags": ["orb", "area"],
+			"base_cost": 3,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 0.045
+		},
+		"regeneration": {
+			"label": "Recovery",
+			"role": "Recover faster",
+			"tags": ["rest", "heal"],
+			"base_cost": 3,
+			"cost_step": 2,
+			"max_level": 6,
+			"effect_per_level": 0.055
+		},
+		"movement_speed_small": {
+			"label": "Small Steps",
+			"role": "Move slightly",
+			"tags": ["move", "small"],
+			"base_cost": 4,
+			"cost_step": 3,
+			"max_level": 6,
+			"effect_per_level": 0.015,
+			"max_multiplier": 1.10
+		},
+		"sign_understanding": {
+			"label": "Sign Sense",
+			"role": "Read signs",
+			"tags": ["sign", "mind"],
+			"base_cost": 4,
+			"cost_step": 3,
+			"max_level": 6,
+			"effect_per_level": 0.035
+		}
+	}
+}

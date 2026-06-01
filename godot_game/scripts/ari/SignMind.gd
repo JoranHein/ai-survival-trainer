@@ -37,7 +37,7 @@ const KEYWORDS := {
 	"build_thorn_totem": ["thorn", "thorns", "skin", "bite", "biting", "touch", "touching", "recoil", "punish", "punishes"],
 	"build_repair_bench": ["workbench", "bench", "tool", "tools", "fixer"],
 	"repair_structure": ["repair", "repairs", "fix", "fixing", "mend", "mending", "patch", "patched", "broken"],
-	"build_storm_rod": ["storm", "storms", "rod", "lightning", "thunder", "sky", "air", "flying", "wing", "wings"],
+	"build_storm_rod": ["storm", "storms", "rod", "lightning", "thunder", "sky", "air", "above", "flying", "wing", "wings"],
 	"rest": ["rest", "sleep", "bed", "quiet", "calm", "heart", "tired", "heal", "safe", "safety", "breathe", "breath", "myself", "alone"],
 	"reflect_library": ["library", "book", "books", "read", "note", "notes", "remember", "lesson", "learn", "think", "mistake", "mistakes", "why"],
 	"defensive_wait": ["wait", "hide", "safe", "safety"],
@@ -88,6 +88,7 @@ func interpret_sign(sign_text: String, personality := {}, run_build := {}) -> Di
 		hints[hint_key] = clampf(float(count) / 2.0, 0.0, 1.0)
 	_apply_personality_to_hints(hints, tokens, matched_keyword_count, personality)
 	_apply_run_build_to_hints(hints, run_build)
+	_apply_storm_aliases(hints)
 	var sign_strength := _calculate_sign_strength(tokens.size(), matched_keyword_count, hints, personality, run_build)
 
 	return {
@@ -187,6 +188,8 @@ func _empty_hints() -> Dictionary:
 		"build_repair_bench": 0.0,
 		"repair_structure": 0.0,
 		"build_storm_rod": 0.0,
+		"anti_flying": 0.0,
+		"sky_answer": 0.0,
 		"rest": 0.0,
 		"reflect_library": 0.0,
 		"defensive_wait": 0.0,
@@ -366,6 +369,14 @@ func _apply_run_build_to_hints(hints: Dictionary, run_build) -> void:
 	for hint_name in HINT_ORDER:
 		var hint_key := str(hint_name)
 		hints[hint_key] = clampf(float(hints.get(hint_key, 0.0)), 0.0, 1.0)
+
+
+func _apply_storm_aliases(hints: Dictionary) -> void:
+	var storm_value := clampf(float(hints.get("build_storm_rod", 0.0)), 0.0, 1.0)
+	if storm_value <= 0.0:
+		return
+	hints["anti_flying"] = maxf(clampf(float(hints.get("anti_flying", 0.0)), 0.0, 1.0), storm_value)
+	hints["sky_answer"] = maxf(clampf(float(hints.get("sky_answer", 0.0)), 0.0, 1.0), storm_value)
 
 
 func _calculate_sign_strength(token_count: int, matched_keyword_count: int, hints: Dictionary, personality: Dictionary, run_build) -> float:

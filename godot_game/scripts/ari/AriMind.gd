@@ -54,6 +54,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var enemy_type_counts := _enemy_type_counts(context)
 	var runner_pressure := clampf(float(int(enemy_type_counts.get("runner", 0))) / 2.0, 0.0, 1.0)
 	var brute_pressure := clampf(float(int(enemy_type_counts.get("brute", 0))), 0.0, 1.0)
+	var flying_pressure := clampf(float(int(enemy_type_counts.get("flying", 0))), 0.0, 1.0)
 	var fearfulness := _trait(personality, "fearfulness")
 	var aggression := _trait(personality, "aggression")
 	var curiosity := _trait(personality, "curiosity")
@@ -90,7 +91,10 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var sign_thorn_preference := _hint(priority_hints, "build_thorn_totem")
 	var sign_repair_bench_preference := _hint(priority_hints, "build_repair_bench")
 	var sign_repair_preference := maxf(_hint(priority_hints, "repair_structure"), _hint(priority_hints, "repair"))
-	var sign_storm_preference := _hint(priority_hints, "build_storm_rod")
+	var sign_storm_preference := maxf(
+		_hint(priority_hints, "build_storm_rod"),
+		maxf(_hint(priority_hints, "anti_flying"), _hint(priority_hints, "sky_answer"))
+	)
 	var sign_rest_preference := _hint(priority_hints, "rest")
 	var sign_reflect_preference := _hint(priority_hints, "reflect_library")
 	var cover_preference := maxf(
@@ -129,6 +133,12 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 		range_preference = clampf(range_preference + 0.18 + brute_pressure * 0.22, 0.0, 1.0)
 		tower_preference = maxf(tower_preference, range_preference)
 		wall_preference = clampf(wall_preference - brute_pressure * 0.18, 0.0, 1.0)
+	if flying_pressure > 0.0:
+		storm_preference = maxf(storm_preference, 0.50 + flying_pressure * 0.18)
+		range_preference = clampf(range_preference + 0.16 + flying_pressure * 0.16, 0.0, 1.0)
+		tower_preference = maxf(tower_preference, range_preference)
+		aura_lure_preference = maxf(aura_lure_preference, 0.30 + flying_pressure * 0.10)
+		wall_preference = clampf(wall_preference - flying_pressure * 0.22, 0.0, 1.0)
 	wall_preference = clampf(wall_preference + (fearfulness * 0.22 if wall_preference > 0.0 or fearfulness >= 0.66 else 0.0), 0.0, 1.0)
 	aura_preference = clampf(aura_preference + (fearfulness * 0.12 + curiosity * 0.10 if aura_preference > 0.0 else 0.0), 0.0, 1.0)
 	mining_preference = clampf(mining_preference + (curiosity * 0.10 if mining_preference > 0.0 else 0.0), 0.0, 1.0)
@@ -143,7 +153,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	thorn_preference = clampf(thorn_preference + thorns_instinct * 0.30 + defense_instinct * 0.08 + (aggression * 0.10 + fearfulness * 0.08 if sign_thorn_preference > 0.0 else 0.0), 0.0, 1.0)
 	repair_bench_preference = clampf(repair_bench_preference + building_instinct * 0.10 + defense_instinct * 0.10 + (fearfulness * 0.10 if sign_repair_bench_preference > 0.0 else 0.0), 0.0, 1.0)
 	repair_preference = clampf(repair_preference + building_instinct * 0.12 + defense_instinct * 0.16 + (0.40 if lowest_structure_hp_ratio < 0.55 else 0.0) + (0.20 if damaged_structure_count >= 2 else 0.0), 0.0, 1.0)
-	storm_preference = clampf(storm_preference + _build_strength(run_build, "attack_range") * 0.18 + warding_instinct * 0.10 + (fearfulness * 0.10 + curiosity * 0.08 if sign_storm_preference > 0.0 else 0.0), 0.0, 1.0)
+	storm_preference = clampf(storm_preference + _build_strength(run_build, "attack_range") * 0.18 + warding_instinct * 0.10 + (fearfulness * 0.10 + curiosity * 0.08 if sign_storm_preference > 0.0 or flying_pressure > 0.0 else 0.0), 0.0, 1.0)
 	rest_preference = clampf(rest_preference + (fear / 100.0) * 0.20 + (0.34 if ari_hp_ratio <= 0.45 else 0.0) + (0.28 if stamina < 38.0 else 0.0) + _build_strength(run_build, "regeneration") * 0.18, 0.0, 1.0)
 	reflect_preference = clampf(reflect_preference + curiosity * 0.12 + _build_strength(run_build, "curiosity") * 0.18 + (0.36 if meaningful_event_count > 0 else 0.0), 0.0, 1.0)
 	if sign_combat_preference > 0.0 and (range_preference > 0.0 or wall_preference > 0.0 or defensive_wait_preference > 0.0):
@@ -208,6 +218,11 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 
 	if sign_repair_preference > 0.25 and damaged_structure_count <= 0 and has_defenses:
 		return _job("wait_or_idle", "Sign wants repair, but nothing is broken yet")
+
+	if flying_pressure > 0.0 and storm_rod_count < 1 and has_defenses:
+		if stone < storm_rod_cost:
+			return _job("mine_stone", "Need stone for storm rod")
+		return _job("build_storm_rod", "Flying enemies need anti-air")
 
 	var tower_use_preference := maxf(sign_tower_preference, range_preference)
 	if tower_use_preference > 0.30 and bow_tower_count > 0 and tower_use_preference >= aura_lure_preference and tower_use_preference >= cover_preference:
@@ -319,6 +334,7 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 	var enemy_type_counts := _enemy_type_counts(context)
 	var runner_pressure := clampf(float(int(enemy_type_counts.get("runner", 0))) / 2.0, 0.0, 1.0)
 	var brute_pressure := clampf(float(int(enemy_type_counts.get("brute", 0))), 0.0, 1.0)
+	var flying_pressure := clampf(float(int(enemy_type_counts.get("flying", 0))), 0.0, 1.0)
 	var cover_preference := maxf(
 		maxf(_hint(priority_hints, "use_existing_wall"), _hint(priority_hints, "wait_behind_wall")),
 		maxf(_hint(priority_hints, "use_cover"), _hint(priority_hints, "hide"))
@@ -342,6 +358,11 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 	if brute_pressure > 0.0:
 		aura_lure_preference = maxf(aura_lure_preference, 0.42 + brute_pressure * 0.12)
 		tower_preference = maxf(tower_preference, 0.44 + brute_pressure * 0.14)
+	if flying_pressure > 0.0:
+		tower_preference = maxf(tower_preference, 0.42 + flying_pressure * 0.12)
+		aura_lure_preference = maxf(aura_lure_preference, 0.34 + flying_pressure * 0.08)
+		cover_preference = clampf(cover_preference - flying_pressure * 0.18, 0.0, 1.0)
+		flee_preference = maxf(flee_preference, 0.22 + flying_pressure * 0.08)
 	var wants_cover := cover_preference > 0.25
 	var wants_aura_lure := aura_lure_preference > 0.25
 	var wants_tower := tower_preference > 0.25
@@ -495,10 +516,21 @@ func thought_for_damage(hp: float, max_hp: float) -> String:
 
 
 func _priority_hints(context: Dictionary) -> Dictionary:
+	var result := {}
 	var hints = context.get("priority_hints", {})
 	if typeof(hints) == TYPE_DICTIONARY:
-		return hints
-	return {}
+		for key in hints.keys():
+			result[str(key)] = clampf(float(hints[key]), 0.0, 1.0)
+	var grounded_plan = context.get("grounded_plan", [])
+	if typeof(grounded_plan) == TYPE_ARRAY:
+		for item in grounded_plan:
+			if typeof(item) != TYPE_DICTIONARY:
+				continue
+			var key := str(item.get("affordance_id", item.get("id", "")))
+			if key == "":
+				continue
+			result[key] = maxf(float(result.get(key, 0.0)), clampf(float(item.get("priority", 0.0)), 0.0, 1.0))
+	return result
 
 
 func _lesson_bias(context: Dictionary) -> Dictionary:
