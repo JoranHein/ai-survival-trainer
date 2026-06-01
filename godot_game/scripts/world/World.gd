@@ -326,7 +326,7 @@ func stage_visual_review_moment(moment: String) -> void:
 			sign_resonance = 0.80
 			ai_survival_theory = "library_reflection"
 			ai_emotion = "curious regret"
-			ai_status = "AI staged"
+			ai_status = "AI: active"
 			_stage_ari_needs(28.0, 88.0, 24.0)
 			day_night.advance(21.0)
 			_advance_debug_daytime(4.0)
@@ -367,7 +367,7 @@ func stage_visual_review_moment(moment: String) -> void:
 			sign_resonance = 0.78
 			ai_survival_theory = "tower_range"
 			ai_emotion = "focused fear"
-			ai_status = "AI staged"
+			ai_status = "AI: active"
 			selected_build_type = BOW_TOWER_BUILD_ID
 			build_grid.call("set_selected_build_type", selected_build_type)
 			_set_status_message("Tower and storm range active.", 2.0)

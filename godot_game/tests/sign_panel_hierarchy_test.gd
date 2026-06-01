@@ -30,6 +30,8 @@ func _run() -> void:
 
 
 func _test_sign_panel_has_dedicated_signal_footer(sign_panel: Node) -> void:
+	_assert(sign_panel.find_child("AiHeaderRow", true, false) != null, "SignPanel should put AI status in the AI section header")
+	_assert(sign_panel.find_child("AiStatusLabel", true, false) != null, "SignPanel should expose readable AI status")
 	_assert(sign_panel.find_child("SignalSeparator", true, false) != null, "SignPanel should separate interpretation from signal footer")
 	_assert(sign_panel.find_child("SignalRow", true, false) != null, "SignPanel should use a footer row for signal values")
 	_assert(sign_panel.find_child("SignalLabel", true, false) != null, "SignPanel should have a dedicated signal label")
@@ -48,10 +50,13 @@ func _test_signal_footer_updates_as_two_scan_tokens(sign_panel: Node) -> void:
 	})
 	await process_frame
 	var signal_label: Label = sign_panel.find_child("SignalLabel", true, false)
+	var status_label: Label = sign_panel.find_child("AiStatusLabel", true, false)
 	var resonance_label: Label = sign_panel.find_child("ResonanceLabel", true, false)
-	if signal_label == null or resonance_label == null:
+	if signal_label == null or status_label == null or resonance_label == null:
 		return
 	_assert(signal_label.text == "SIGNAL 82%", "signal footer should show a compact signal token")
+	_assert(status_label.text == "AI disabled", "AI status should live separately from signal strength")
+	_assert(status_label.get_parent().name == "AiHeaderRow", "AI status should stay in the AI header row, not the footer")
 	_assert(resonance_label.text == "RESONANCE 64%", "signal footer should show a compact resonance token")
 	_assert(not signal_label.text.contains("|"), "signal token should not use pipe separators")
 	_assert(not resonance_label.text.contains("|"), "resonance token should not use pipe separators")

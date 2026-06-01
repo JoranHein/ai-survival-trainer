@@ -9,8 +9,6 @@ signal sign_cancelled
 @onready var commit_button: Button = %CommitButton
 @onready var cancel_button: Button = %CancelButton
 @onready var sign_label: Label = %SignLabel
-@onready var ari_context_label: Label = %AriContextLabel
-@onready var run_context_label: Label = %RunContextLabel
 @onready var reading_label: Label = %ReadingLabel
 @onready var theory_label: Label = %TheoryLabel
 @onready var plan_label: Label = %PlanLabel
@@ -37,21 +35,21 @@ func update_state(state: Dictionary) -> void:
 	var top_plan := str(state.get("ai_top_grounded_plan", "")).strip_edges()
 	var top_hint := str(state.get("ai_top_hint", "")).strip_edges()
 	var ai_status := str(state.get("ai_status", "AI disabled")).strip_edges()
-	var personality_summary := str(state.get("personality_summary", "Ari: balanced"))
 	var sign_strength := clampf(float(state.get("sign_strength", 0.0)), 0.0, 1.0)
 	var resonance := clampf(float(state.get("sign_resonance", 0.0)), 0.0, 1.0)
 	var plan_text := top_plan if top_plan != "" else _plan_text_from_hint(top_hint)
 	if plan_text == "":
 		plan_text = "watch and survive"
+	if ai_status == "":
+		ai_status = "AI disabled"
 
-	sign_label.text = "The sign says:\n\"%s\"" % _display_sign_text(_current_sign_text)
-	ari_context_label.text = _limit_text("Ari: %s" % personality_summary.trim_prefix("Ari: "), 34)
-	run_context_label.text = _limit_text("Run: %s" % _compact_run_build_line(state), 42)
-	reading_label.text = "Reads: %s" % _limit_text(interpretation, 91)
-	theory_label.text = "Theory: %s" % _limit_text(survival_theory if survival_theory != "" else "local reading", 89)
-	plan_label.text = "Plan: %s" % _limit_text(plan_text, 91)
+	sign_label.text = "\"%s\"" % _limit_text(_display_sign_text(_current_sign_text), 116)
+	reading_label.text = "Meaning: %s" % _limit_text(interpretation, 95)
+	theory_label.text = "Theory: %s" % _limit_text(survival_theory if survival_theory != "" else "local reading", 96)
+	plan_label.text = "Plan: %s" % _limit_text(plan_text, 98)
 	ai_status_label.text = ai_status
-	ai_status_label.visible = ai_status != ""
+	ai_status_label.visible = true
+	_apply_ai_status_style(ai_status)
 	signal_label.text = "SIGNAL %d%%" % int(round(sign_strength * 100.0))
 	resonance_label.text = "RESONANCE %d%%" % int(round(resonance * 100.0))
 
@@ -109,24 +107,24 @@ func _display_sign_text(text: String) -> String:
 	return clean_text.replace("\n", " / ")
 
 
-func _compact_run_build_line(state: Dictionary) -> String:
-	var run_build = state.get("run_build", {})
-	if typeof(run_build) != TYPE_DICTIONARY:
-		return str(state.get("run_build_summary", "Balanced"))
-	var name := str(run_build.get("preset_name", state.get("run_build_name", "Balanced")))
-	var tags := _format_tags(run_build.get("tags", []), 1)
-	if tags != "":
-		return "%s | %s" % [name, tags]
-	var role := str(run_build.get("role", "")).strip_edges()
-	if role != "":
-		return "%s - %s" % [name, role]
-	return name
-
-
 func _limit_text(text: String, max_length: int) -> String:
 	if text.length() <= max_length:
 		return text
 	return text.substr(0, max_length - 3).strip_edges() + "..."
+
+
+func _apply_ai_status_style(ai_status: String) -> void:
+	var status := ai_status.to_lower()
+	var color := Color(0.62, 0.68, 0.70, 1.0)
+	if status.contains("thinking"):
+		color = Color(0.62, 0.86, 1.0, 1.0)
+	elif status.contains("cached"):
+		color = Color(0.58, 0.96, 0.62, 1.0)
+	elif status.contains("active"):
+		color = Color(0.76, 1.0, 0.72, 1.0)
+	elif status.contains("failed") or status.contains("fallback"):
+		color = Color(1.0, 0.74, 0.52, 1.0)
+	ai_status_label.add_theme_color_override("font_color", color)
 
 
 func _plan_text_from_hint(top_hint: String) -> String:
@@ -154,17 +152,3 @@ func _plan_text_from_hint(top_hint: String) -> String:
 		"mine_stone", "mining":
 			return "stone"
 	return top_hint.replace("_", " ") if top_hint != "" else ""
-
-
-func _format_tags(raw_tags, limit := 3) -> String:
-	if typeof(raw_tags) != TYPE_ARRAY:
-		return ""
-	var tags := PackedStringArray()
-	for raw_tag in raw_tags:
-		var clean_tag := str(raw_tag).strip_edges()
-		if clean_tag == "":
-			continue
-		tags.append(clean_tag)
-		if tags.size() >= limit:
-			break
-	return ", ".join(tags)

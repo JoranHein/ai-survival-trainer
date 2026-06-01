@@ -39,16 +39,10 @@ func update_state(state: Dictionary) -> void:
 	var status_message := str(state.get("status_message", ""))
 	var inspect_text := str(state.get("inspect_text", ""))
 	var death_recap := str(state.get("death_recap", ""))
-	var sign_action_focus := str(state.get("sign_action_focus", ""))
-	var ai_status := str(state.get("ai_status", "AI disabled"))
-	var ai_survival_theory := str(state.get("ai_survival_theory", ""))
-	var ai_top_grounded_plan := str(state.get("ai_top_grounded_plan", ""))
-	var ai_top_hint := str(state.get("ai_top_hint", ""))
 	var progression := _progression(state)
 	var time_points := int(progression.get("time_points", 0))
 	var permanent_summary := str(progression.get("permanent_summary", "No permanent upgrades yet"))
 	var lesson_count := int(state.get("lesson_count", 0))
-	var latest_lesson_title := str(state.get("latest_lesson_title", ""))
 	var ari_alive := true
 	var alive_value = state.get("ari_alive", true)
 	if typeof(alive_value) == TYPE_BOOL:
@@ -61,53 +55,39 @@ func update_state(state: Dictionary) -> void:
 		short_upgrade_summary = permanent_summary.substr(0, 31) + "..."
 
 	var status_lines := [
-		_status_header_line(day, phase, time_left, ari_hp, ari_max_hp, enemy_count, enemy_type_counts, stone, food),
+		_status_header_line(day, phase, time_left, ari_hp, ari_max_hp, enemy_count, enemy_type_counts),
 	]
 	var mind_lines := [
-		"%s    Build: %s" % [
-			personality_summary,
-			run_build_line,
-		],
-		"Doing: %s    Why: %s" % [
-			ari_action,
-			ari_job_reason,
-		],
+		"ARI  %s" % _limit_text(personality_summary.trim_prefix("Ari: "), 64),
+		"Doing: %s  Why: %s" % [ari_action, _limit_text(ari_job_reason, 58)],
 	]
 	var build_lines := []
 	if not ari_alive:
 		status_lines.append("Ari died. Press R to restart.")
-		mind_lines = [_compact_death_summary(death_recap)]
+		mind_lines = [
+			"ARI  dead",
+			_compact_death_summary(death_recap),
+		]
 		build_lines = [_death_resource_line(time_points, short_upgrade_summary)]
 	else:
 		var selected_cost := _selected_build_cost(state, selected_build_type)
 		build_lines = [
-			"Build: %s %dst %s    %s" % [
+			"RESOURCES  Stone %d  Food %d  TP %d" % [stone, food, time_points],
+			"Build: %s %dst %s" % [
 				selected_build_name,
 				selected_cost,
 				"ON" if build_mode else "OFF",
-				_build_counts_line(state),
 			],
+			"Preset: %s  Keys: B/O/X/Y/C/F/D/H/K/L" % run_build_line,
+			_build_counts_line(state),
 		]
 		var support_line := _support_counts_line(state)
 		if support_line != "Support: none":
 			build_lines.append(support_line)
-		build_lines.append(_combat_summary_line(combat_stats, lesson_count, time_points, short_upgrade_summary))
-		if latest_lesson_title != "":
-			mind_lines.append("Note: %s" % latest_lesson_title)
-		if sign_action_focus != "":
-			mind_lines.append(sign_action_focus)
-		if ai_survival_theory != "":
-			mind_lines.append("AI theory: %s" % ai_survival_theory)
-		if ai_top_grounded_plan != "":
-			mind_lines.append("AI plan: %s" % ai_top_grounded_plan)
-		elif ai_top_hint != "":
-			mind_lines.append("Top hint: %s" % ai_top_hint)
-		if ai_status != "":
-			mind_lines.append(ai_status)
-		if inspect_text != "":
-			mind_lines.append(inspect_text)
-		if status_message != "":
-			mind_lines.append(status_message)
+		build_lines.append(_combat_summary_line(combat_stats, lesson_count, short_upgrade_summary))
+		var context_line := _hud_context_line(inspect_text, status_message)
+		if context_line != "":
+			mind_lines.append(context_line)
 		if mining_enabled:
 			build_lines.append("Mining debug ON")
 	_update_meter_strip(ari_hp, ari_max_hp, needs)
@@ -145,17 +125,24 @@ func _enemy_type_counts(state: Dictionary) -> Dictionary:
 	return {}
 
 
-func _status_header_line(day: int, phase: String, time_left: float, ari_hp: float, ari_max_hp: float, enemy_count: int, enemy_type_counts: Dictionary, stone: int, food: int) -> String:
-	return "D%d %s %.0fs   HP %.0f/%.0f   %s   Stone %d Food %d" % [
+func _status_header_line(day: int, phase: String, time_left: float, ari_hp: float, ari_max_hp: float, enemy_count: int, enemy_type_counts: Dictionary) -> String:
+	return "SURVIVAL  D%d %s %.0fs  HP %.0f/%.0f  %s" % [
 		day,
-		phase,
+		_phase_token(phase),
 		time_left,
 		ari_hp,
 		ari_max_hp,
 		_enemy_mix_token(enemy_count, enemy_type_counts),
-		stone,
-		food,
 	]
+
+
+func _phase_token(phase: String) -> String:
+	var clean_phase := phase.strip_edges()
+	if clean_phase == "":
+		return "UNKNOWN"
+	if clean_phase.to_lower() == "night":
+		return "NIGHT"
+	return clean_phase.capitalize()
 
 
 func _enemy_mix_token(enemy_count: int, counts: Dictionary) -> String:
@@ -258,13 +245,12 @@ func _count_tokens(state: Dictionary, definitions: Array) -> PackedStringArray:
 	return tokens
 
 
-func _combat_summary_line(combat_stats: Dictionary, lesson_count: int, time_points: int, short_upgrade_summary: String) -> String:
-	return "Combat L%.1f  +%d%% dmg  +%d%% def   Notes %d  TP %d  %s" % [
+func _combat_summary_line(combat_stats: Dictionary, lesson_count: int, short_upgrade_summary: String) -> String:
+	return "Combat L%.1f  +%d%% dmg  +%d%% def  Notes %d  %s" % [
 		float(combat_stats.get("combat_level", 0.0)),
 		int(round(float(combat_stats.get("damage_bonus", 0.0)) * 100.0)),
 		int(round(float(combat_stats.get("defense_training", 0.0)) * 100.0)),
 		lesson_count,
-		time_points,
 		short_upgrade_summary,
 	]
 
@@ -304,7 +290,22 @@ func _death_tip_text(recap: String) -> String:
 
 
 func _death_resource_line(time_points: int, short_upgrade_summary: String) -> String:
-	return "After death: TP %d  %s" % [time_points, short_upgrade_summary]
+	return "RESOURCES  TP %d  %s" % [time_points, short_upgrade_summary]
+
+
+func _hud_context_line(inspect_text: String, status_message: String) -> String:
+	var message := inspect_text.strip_edges()
+	if message == "":
+		message = status_message.strip_edges()
+	if message == "":
+		return ""
+	return "Info: %s" % _limit_text(message, 72)
+
+
+func _limit_text(text: String, max_length: int) -> String:
+	if text.length() <= max_length:
+		return text
+	return text.substr(0, max_length - 3).strip_edges() + "..."
 
 
 func _run_build(state: Dictionary) -> Dictionary:

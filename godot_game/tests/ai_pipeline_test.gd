@@ -409,10 +409,14 @@ func _test_sign_panel_ai_status_line() -> void:
 		"sign_text": "stand behind the wall",
 		"sign_interpretation": "Ari reads the wall as cover.",
 	})
-	var status_label = panel.get_node_or_null("DisplayPanel/DisplayVBox/SignalRow/AiStatusLabel")
-	_assert(status_label != null, "SignPanel should expose a compact AI status line in the signal row")
+	var status_label = panel.get_node_or_null("DisplayPanel/DisplayVBox/AiHeaderRow/AiStatusLabel")
+	_assert(status_label != null, "SignPanel should expose a compact AI status line in the AI section")
 	if status_label != null:
 		_assert(str(status_label.get("text")) == "AI: thinking 12s...", "SignPanel should show the current AI status")
+	var sign_header = panel.get_node_or_null("DisplayPanel/DisplayVBox/SignHeaderLabel")
+	var ai_header = panel.get_node_or_null("DisplayPanel/DisplayVBox/AiHeaderRow/AIHeaderLabel")
+	_assert(sign_header != null and str(sign_header.get("text")) == "SIGN", "SignPanel should group the current sign under a Sign header")
+	_assert(ai_header != null and str(ai_header.get("text")) == "AI", "SignPanel should group interpretation under an AI header")
 	var plan_label = panel.get_node_or_null("DisplayPanel/DisplayVBox/PlanLabel")
 	_assert(plan_label != null, "SignPanel should expose a readable plan label")
 	if plan_label != null:
@@ -441,13 +445,42 @@ func _test_hud_enemy_counter_is_readable() -> void:
 		},
 		"stone": 12,
 		"food": 2,
+		"ari_action": "use_cover",
+		"ari_job_reason": "Use existing wall.",
+		"selected_build_name": "Tower",
+		"selected_build_type": "bow_tower",
+		"run_build_name": "Balanced",
+		"ai_survival_theory": "Remote theory should stay out of the HUD.",
+		"ai_top_grounded_plan": "Remote plan should stay out of the HUD.",
+		"ai_top_hint": "build_tower",
+		"ai_status": "AI: active",
 	})
 	var status_label = hud.get_node_or_null("StatusPanel/Content/StatusLabel")
+	var mind_label = hud.get_node_or_null("StatusPanel/Content/MindLabel")
+	var build_label = hud.get_node_or_null("StatusPanel/Content/BuildLabel")
 	_assert(status_label != null, "HUD should expose its status label")
 	if status_label != null:
 		var text := str(status_label.get("text"))
+		_assert(text.contains("SURVIVAL"), "HUD should group phase, HP, and enemies under Survival")
+		_assert(text.contains("NIGHT"), "HUD should make night phase obvious")
 		_assert(text.contains("Enemies 4"), "HUD should label the enemy counter with a readable word")
 		_assert(text.contains("Z1 R1 B1 F1"), "HUD should preserve per-enemy-type counters")
+	_assert(mind_label != null, "HUD should expose Ari state")
+	if mind_label != null:
+		var text := str(mind_label.get("text"))
+		_assert(text.contains("ARI"), "HUD should group current behavior under Ari")
+		_assert(not text.contains("AI theory"), "HUD should not duplicate AI theory from the SignPanel")
+		_assert(not text.contains("AI plan"), "HUD should not duplicate AI plan from the SignPanel")
+		_assert(not text.contains("Top hint"), "HUD should not duplicate sign hint text from the SignPanel")
+		_assert(not text.contains("AI:"), "HUD should leave AI status to the SignPanel")
+	_assert(build_label != null, "HUD should expose resources and build preset")
+	if build_label != null:
+		var text := str(build_label.get("text"))
+		_assert(text.contains("RESOURCES"), "HUD should group stone, food, and TP under Resources")
+		_assert(text.contains("Stone 12"), "HUD should keep stone readable")
+		_assert(text.contains("Food 2"), "HUD should keep food readable")
+		_assert(text.contains("Build: Tower"), "HUD should keep the current build preset readable")
+		_assert(text.contains("Keys:"), "HUD should preserve compact keyboard hints")
 	root.remove_child(hud)
 	hud.queue_free()
 	await process_frame

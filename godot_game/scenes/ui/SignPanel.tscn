@@ -53,40 +53,40 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_display")
 layout_mode = 2
 theme_override_constants/separation = 5
 
-[node name="TitleLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+[node name="SignHeaderLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
+unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(0.91, 0.98, 0.84, 1)
-theme_override_font_sizes/font_size = 18
-text = "WHISPER SIGN"
+theme_override_colors/font_color = Color(0.72, 0.88, 0.74, 1)
+theme_override_font_sizes/font_size = 12
+text = "SIGN"
 
 [node name="SignLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.96, 0.98, 0.94, 1)
 theme_override_font_sizes/font_size = 14
-text = "The sign says:"
+text = "\"(empty)\""
 autowrap_mode = 3
 
-[node name="ContextRow" type="HBoxContainer" parent="DisplayPanel/DisplayVBox"]
+[node name="AiHeaderRow" type="HBoxContainer" parent="DisplayPanel/DisplayVBox"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 8
+theme_override_constants/separation = 10
 
-[node name="AriContextLabel" type="Label" parent="DisplayPanel/DisplayVBox/ContextRow"]
+[node name="AIHeaderLabel" type="Label" parent="DisplayPanel/DisplayVBox/AiHeaderRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.76, 0.86, 0.84, 1)
+theme_override_colors/font_color = Color(0.72, 0.86, 1, 1)
 theme_override_font_sizes/font_size = 12
-text = "Ari: balanced"
+text = "AI"
 
-[node name="RunContextLabel" type="Label" parent="DisplayPanel/DisplayVBox/ContextRow"]
+[node name="AiStatusLabel" type="Label" parent="DisplayPanel/DisplayVBox/AiHeaderRow"]
 unique_name_in_owner = true
 layout_mode = 2
-size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.73, 0.82, 0.72, 1)
+theme_override_colors/font_color = Color(0.72, 0.86, 1, 1)
 theme_override_font_sizes/font_size = 12
-text = "Run: Balanced"
+text = "AI disabled"
 horizontal_alignment = 2
 
 [node name="ReadingLabel" type="Label" parent="DisplayPanel/DisplayVBox"]
@@ -131,13 +131,6 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.72, 0.88, 0.74, 1)
 theme_override_font_sizes/font_size = 12
 text = "SIGNAL 0%"
-
-[node name="AiStatusLabel" type="Label" parent="DisplayPanel/DisplayVBox/SignalRow"]
-unique_name_in_owner = true
-layout_mode = 2
-theme_override_colors/font_color = Color(0.72, 0.86, 1, 1)
-theme_override_font_sizes/font_size = 12
-text = "AI disabled"
 
 [node name="FooterSpacer" type="Control" parent="DisplayPanel/DisplayVBox/SignalRow"]
 layout_mode = 2
