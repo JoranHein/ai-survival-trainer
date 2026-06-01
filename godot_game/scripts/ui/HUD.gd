@@ -164,10 +164,10 @@ func _enemy_mix_token(enemy_count: int, counts: Dictionary) -> String:
 	var brutes := int(counts.get("brute", 0))
 	var flying := int(counts.get("flying", 0))
 	if enemy_count <= 0:
-		return "E0"
+		return "Enemies 0"
 	if runners <= 0 and brutes <= 0 and flying <= 0:
-		return "E%d Z%d" % [enemy_count, zombies]
-	return "E%d Z%d R%d B%d F%d" % [enemy_count, zombies, runners, brutes, flying]
+		return "Enemies %d Z%d" % [enemy_count, zombies]
+	return "Enemies %d Z%d R%d B%d F%d" % [enemy_count, zombies, runners, brutes, flying]
 
 
 func _hp_meter(value: float, maximum: float) -> String:

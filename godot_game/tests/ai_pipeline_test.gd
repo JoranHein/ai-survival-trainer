@@ -17,6 +17,7 @@ const EnemyControllerScript = preload("res://scripts/enemies/EnemyController.gd"
 const WaveDirectorScript = preload("res://scripts/world/WaveDirector.gd")
 const WorldScript = preload("res://scripts/world/World.gd")
 const SignPanelScene = preload("res://scenes/ui/SignPanel.tscn")
+const HUDScene = preload("res://scenes/ui/HUD.tscn")
 
 var failures: Array[String] = []
 
@@ -35,6 +36,7 @@ func _run() -> void:
 	_test_ai_latency_cache_v1_contract(bridge)
 	await _test_world_ai_latency_commit_contract()
 	await _test_sign_panel_ai_status_line()
+	await _test_hud_enemy_counter_is_readable()
 	_test_local_combat_signs()
 	_test_local_tower_range_signs()
 	_test_local_flying_storm_signs()
@@ -403,6 +405,7 @@ func _test_sign_panel_ai_status_line() -> void:
 	await process_frame
 	panel.call("update_state", {
 		"ai_status": "AI: thinking 12s...",
+		"ai_top_hint": "build_tower",
 		"sign_text": "stand behind the wall",
 		"sign_interpretation": "Ari reads the wall as cover.",
 	})
@@ -410,8 +413,43 @@ func _test_sign_panel_ai_status_line() -> void:
 	_assert(status_label != null, "SignPanel should expose a compact AI status line in the signal row")
 	if status_label != null:
 		_assert(str(status_label.get("text")) == "AI: thinking 12s...", "SignPanel should show the current AI status")
+	var plan_label = panel.get_node_or_null("DisplayPanel/DisplayVBox/PlanLabel")
+	_assert(plan_label != null, "SignPanel should expose a readable plan label")
+	if plan_label != null:
+		_assert(str(plan_label.get("text")).contains("tower range"), "SignPanel should fall back to the local top hint when no grounded AI plan exists")
 	root.remove_child(panel)
 	panel.queue_free()
+	await process_frame
+
+
+func _test_hud_enemy_counter_is_readable() -> void:
+	var hud = HUDScene.instantiate()
+	root.add_child(hud)
+	await process_frame
+	hud.call("update_state", {
+		"day": 2,
+		"phase": "night",
+		"time_left": 12.0,
+		"ari_hp": 80.0,
+		"ari_max_hp": 100.0,
+		"enemy_count": 4,
+		"enemy_type_counts": {
+			"zombie": 1,
+			"runner": 1,
+			"brute": 1,
+			"flying": 1,
+		},
+		"stone": 12,
+		"food": 2,
+	})
+	var status_label = hud.get_node_or_null("StatusPanel/Content/StatusLabel")
+	_assert(status_label != null, "HUD should expose its status label")
+	if status_label != null:
+		var text := str(status_label.get("text"))
+		_assert(text.contains("Enemies 4"), "HUD should label the enemy counter with a readable word")
+		_assert(text.contains("Z1 R1 B1 F1"), "HUD should preserve per-enemy-type counters")
+	root.remove_child(hud)
+	hud.queue_free()
 	await process_frame
 
 
@@ -658,10 +696,14 @@ func _test_local_flying_storm_signs() -> void:
 		"build a storm rod for the sky",
 		"lightning should answer flying teeth",
 		"air danger needs thunder",
+		"the wings do not fear stone",
 	]:
 		var interpretation := sign_mind.interpret_sign(sign_text)
 		var hints: Dictionary = interpretation.get("priority_hints", {})
 		_assert(float(hints.get("build_storm_rod", 0.0)) > 0.0, "local SignMind should read '%s' as Storm Rod intent" % sign_text)
+		if sign_text == "the wings do not fear stone":
+			_assert(float(hints.get("build_storm_rod", 0.0)) > float(hints.get("build_fear_lantern", 0.0)), "wings should beat the fear keyword in local anti-flying signs")
+			_assert(str(interpretation.get("interpretation_text", "")).to_lower().contains("sky"), "wings/stone sign should produce a sky interpretation")
 	sign_mind.free()
 
 

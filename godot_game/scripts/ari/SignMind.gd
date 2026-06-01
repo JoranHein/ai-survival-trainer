@@ -86,6 +86,7 @@ func interpret_sign(sign_text: String, personality := {}, run_build := {}) -> Di
 		var count := _count_keyword_matches(tokens, keywords)
 		matched_keyword_count += count
 		hints[hint_key] = clampf(float(count) / 2.0, 0.0, 1.0)
+	_apply_phrase_overrides(hints, tokens)
 	_apply_personality_to_hints(hints, tokens, matched_keyword_count, personality)
 	_apply_run_build_to_hints(hints, run_build)
 	_apply_storm_aliases(hints)
@@ -209,6 +210,25 @@ func _count_keyword_matches(tokens: PackedStringArray, keywords: Array) -> int:
 		if tokens.has(str(keyword)):
 			count += 1
 	return count
+
+
+func _apply_phrase_overrides(hints: Dictionary, tokens: PackedStringArray) -> void:
+	var sky_language := _has_any_token(tokens, ["wing", "wings", "flying", "sky", "air"])
+	if not sky_language:
+		return
+	hints["build_storm_rod"] = maxf(float(hints.get("build_storm_rod", 0.0)), 0.85)
+	if _has_any_token(tokens, ["fear", "afraid"]):
+		hints["build_fear_lantern"] = minf(float(hints.get("build_fear_lantern", 0.0)), 0.35)
+	if _has_any_token(tokens, ["stone", "wall", "walls"]):
+		hints["wall"] = minf(float(hints.get("wall", 0.0)), 0.35)
+		hints["mining"] = minf(float(hints.get("mining", 0.0)), 0.35)
+
+
+func _has_any_token(tokens: PackedStringArray, words: Array) -> bool:
+	for word in words:
+		if tokens.has(str(word)):
+			return true
+	return false
 
 
 func _build_interpretation_text(hints: Dictionary) -> String:

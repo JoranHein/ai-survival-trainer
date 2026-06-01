@@ -35,17 +35,21 @@ func update_state(state: Dictionary) -> void:
 	var interpretation := str(state.get("sign_interpretation", "No sign yet."))
 	var survival_theory := str(state.get("ai_survival_theory", "")).strip_edges()
 	var top_plan := str(state.get("ai_top_grounded_plan", "")).strip_edges()
+	var top_hint := str(state.get("ai_top_hint", "")).strip_edges()
 	var ai_status := str(state.get("ai_status", "AI disabled")).strip_edges()
 	var personality_summary := str(state.get("personality_summary", "Ari: balanced"))
 	var sign_strength := clampf(float(state.get("sign_strength", 0.0)), 0.0, 1.0)
 	var resonance := clampf(float(state.get("sign_resonance", 0.0)), 0.0, 1.0)
+	var plan_text := top_plan if top_plan != "" else _plan_text_from_hint(top_hint)
+	if plan_text == "":
+		plan_text = "watch and survive"
 
 	sign_label.text = "The sign says:\n\"%s\"" % _display_sign_text(_current_sign_text)
 	ari_context_label.text = _limit_text("Ari: %s" % personality_summary.trim_prefix("Ari: "), 34)
 	run_context_label.text = _limit_text("Run: %s" % _compact_run_build_line(state), 42)
 	reading_label.text = "Reads: %s" % _limit_text(interpretation, 91)
 	theory_label.text = "Theory: %s" % _limit_text(survival_theory if survival_theory != "" else "local reading", 89)
-	plan_label.text = "Plan: %s" % _limit_text(top_plan if top_plan != "" else "watch and survive", 91)
+	plan_label.text = "Plan: %s" % _limit_text(plan_text, 91)
 	ai_status_label.text = ai_status
 	ai_status_label.visible = ai_status != ""
 	signal_label.text = "SIGNAL %d%%" % int(round(sign_strength * 100.0))
@@ -123,6 +127,33 @@ func _limit_text(text: String, max_length: int) -> String:
 	if text.length() <= max_length:
 		return text
 	return text.substr(0, max_length - 3).strip_edges() + "..."
+
+
+func _plan_text_from_hint(top_hint: String) -> String:
+	match top_hint:
+		"build_tower", "use_tower", "ranged_attack", "train_bow", "range":
+			return "tower range"
+		"build_storm_rod", "anti_flying", "sky_answer":
+			return "sky answer"
+		"place_aura_orb", "lure_to_aura", "aura_orb":
+			return "light"
+		"use_existing_wall", "wait_behind_wall", "use_cover", "wall", "build_wall":
+			return "cover"
+		"farm_food", "eat", "eat_food":
+			return "food"
+		"rest":
+			return "rest"
+		"reflect_library":
+			return "library"
+		"train_combat", "prepare_weapon", "fight", "combat_training":
+			return "combat"
+		"repair", "repair_structure":
+			return "repair"
+		"build_trap", "build_spike_trap":
+			return "traps"
+		"mine_stone", "mining":
+			return "stone"
+	return top_hint.replace("_", " ") if top_hint != "" else ""
 
 
 func _format_tags(raw_tags, limit := 3) -> String:
