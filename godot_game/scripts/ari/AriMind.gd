@@ -301,6 +301,9 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	if sign_repair_preference > 0.25 and damaged_structure_count <= 0 and has_defenses:
 		return _job("wait_or_idle", "Sign wants repair, but nothing is broken yet")
 
+	if active_enemy_count <= 0 and cover_preference > 0.30 and wall_count > 0:
+		return _job("use_cover", "Sign says use the existing wall as cover")
+
 	if active_enemy_count <= 0 and wall_preference > 0.0 and wall_count < mini(desired_wall_count, 2):
 		if stone < wall_cost:
 			return _job("mine_stone", "Need stone for wall")
@@ -314,9 +317,6 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 
 	if aura_lure_preference > 0.30 and aura_orb_count > 0 and aura_lure_preference >= cover_preference:
 		return _job("lure_to_aura", "Sign says the light should hurt them")
-
-	if cover_preference > 0.30 and wall_count > 0:
-		return _job("use_cover", "Sign says use the existing wall as cover")
 
 	if tower_use_preference > 0.30 and bow_tower_count > 0:
 		return _job("use_tower", "Sign says use tower range")

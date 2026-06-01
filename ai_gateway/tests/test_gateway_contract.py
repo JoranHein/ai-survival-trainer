@@ -302,6 +302,140 @@ def test_deep_request_accepts_rulebook_perception_and_prompt_uses_strategy_conte
     assert "Do not invent unavailable actions" in prompt
 
 
+INTELLIGENCE_CONTRACT_SCENARIOS = [
+    {
+        "sign": "stand behind the wall",
+        "world": {"wall_count": 2, "enemy_count": 1, "enemy_type_counts": {"zombie": 1}},
+        "facts": ["A wall is between Ari and a ground enemy."],
+        "expected_plan": ["use_existing_wall", "use_cover", "wait_behind_wall"],
+        "reject": ["build_wall"],
+    },
+    {
+        "sign": "stand behind the wall",
+        "world": {"wall_count": 0, "stone": 12, "enemy_count": 0},
+        "facts": ["No wall exists; Ari must make cover before using it."],
+        "expected_plan": ["build_wall"],
+        "reject": ["use_existing_wall"],
+    },
+    {
+        "sign": "become a silent spider and make the dead walk into your web",
+        "world": {"aura_orb_count": 1, "enemy_count": 2, "enemy_type_counts": {"zombie": 2}},
+        "facts": ["Aura Orb exists, but enemies are outside its damage circle."],
+        "expected_plan": ["lure_to_aura", "use_cover"],
+        "reject": ["fight_head_on"],
+    },
+    {
+        "sign": "do not hide, focus on killing enemies",
+        "world": {"ore": 3, "sword_tier": 0, "enemy_count": 0},
+        "facts": ["Daytime prep can improve the sword before fighting."],
+        "expected_plan": ["smith_sword", "train_sword", "fight_head_on"],
+        "reject": ["hide_until_dawn"],
+    },
+    {
+        "sign": "just survive until morning",
+        "world": {"phase": "night", "time_left": 8, "wall_count": 1, "enemy_count": 2},
+        "facts": ["Dawn is soon; stalling can be valid.", "Ari has low HP."],
+        "expected_plan": ["stall_until_dawn", "hide_until_dawn", "use_cover", "flee"],
+        "reject": ["fight_head_on"],
+    },
+    {
+        "sign": "the wings do not fear stone",
+        "world": {"wall_count": 2, "stone": 12, "enemy_count": 1, "enemy_type_counts": {"flying": 1}},
+        "facts": ["Flying enemies ignore walls; Storm Rod or range matters."],
+        "expected_plan": ["build_storm_rod", "anti_flying", "sky_answer", "ranged_attack"],
+        "reject": ["build_wall"],
+    },
+    {
+        "sign": "my stomach is a second wall",
+        "world": {"food": 1, "enemy_count": 0},
+        "facts": ["Hunger is high; food is safety."],
+        "expected_plan": ["eat_food", "eat", "farm_food", "rest"],
+        "reject": ["fight_head_on"],
+    },
+    {
+        "sign": "attack them around the corner with a bow",
+        "world": {"wall_count": 1, "bow_tower_count": 1, "enemy_count": 1},
+        "facts": ["Existing wall cover and bow tower range can combine."],
+        "expected_plan": ["use_cover", "ranged_attack", "use_tower"],
+        "reject": ["build_wall"],
+    },
+]
+
+
+@pytest.mark.parametrize("scenario", INTELLIGENCE_CONTRACT_SCENARIOS, ids=lambda item: item["sign"])
+def test_deep_interpretation_intelligence_scenario_contracts(monkeypatch, scenario):
+    import app.main as gateway_main
+
+    payload = _intelligence_payload(scenario)
+    expected_plan = scenario["expected_plan"]
+    reject = set(scenario["reject"])
+
+    async def fake_call_deep_model(_request, _settings):
+        return {
+            "interpretation": "Ari maps the sign to current world-aware tools.",
+            "thought": "The sign is strange, but the world makes it practical.",
+            "survival_theory": "world_aware_strategy",
+            "emotion": "focused",
+            "grounded_plan": [
+                {
+                    "affordance_id": expected_plan[0],
+                    "priority": 0.92,
+                    "reason": "The sign and perception make this the best executable step.",
+                },
+                {
+                    "affordance_id": expected_plan[-1],
+                    "priority": 0.66,
+                    "reason": "This is the next fallback if the first step fails.",
+                },
+                {
+                    "affordance_id": "unknown_magic",
+                    "priority": 1.0,
+                    "reason": "Must be removed.",
+                },
+            ],
+            "priority_hints": {
+                expected_plan[0]: 1.2,
+                "unknown_magic": 1.0,
+                **{key: 0.99 for key in reject},
+            },
+            "sign_strength": 1.4,
+            "resonance": -2,
+        }
+
+    monkeypatch.setattr(gateway_main, "call_deep_model", fake_call_deep_model)
+
+    client = TestClient(gateway_main.app)
+    response = client.post("/ai/deep-interpretation", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    validated = DeepInterpretationResponse(**data)
+    assert validated.grounded_plan[0]["affordance_id"] in expected_plan
+    assert validated.priority_hints[expected_plan[0]] == 1.0
+    assert "unknown_magic" not in validated.priority_hints
+    assert validated.sign_strength == 1.0
+    assert validated.resonance == 0.0
+
+
+def test_prompt_prioritizes_world_perception_over_generic_examples():
+    payload = _intelligence_payload(
+        {
+            "sign": "the wall is already enough, do not build more",
+            "world": {"wall_count": 2, "enemy_count": 1, "enemy_type_counts": {"zombie": 1}},
+            "facts": ["A wall is between Ari and a ground enemy.", "Existing cover is already enough."],
+            "expected_plan": ["use_existing_wall", "use_cover"],
+            "reject": ["build_wall"],
+        }
+    )
+
+    prompt = deep_user_prompt(DeepInterpretationRequest(**payload))
+
+    assert "Prefer concrete perception facts and available affordances over generic examples" in prompt
+    assert "If perception says a tool already exists, prefer using it before building another copy" in prompt
+    assert "the floor should fight" in prompt
+    assert "make the room dangerous" in prompt
+
+
 def _deep_request(sign_text: str) -> "DeepInterpretationRequest":
     from app.schemas import (
         AffordanceState,
@@ -458,6 +592,59 @@ def _modern_godot_payload() -> dict:
         },
         "benign_future_top_level": "ignored",
     }
+
+
+def _intelligence_payload(scenario: dict) -> dict:
+    payload = _modern_godot_payload()
+    payload["sign_text"] = scenario["sign"]
+    payload["rulebook"] = {
+        "version": "ari_strategy_rulebook_v1",
+        "rules": {
+            "objective": "Survive as many nights as possible; killing is optional.",
+            "walls": "Walls block ground enemies but flying enemies ignore walls.",
+            "aura_orb": "Aura Orb works through positioning and luring.",
+            "tower": "Tower and cover can combine for protected range.",
+            "runners": "Runners punish open layouts and require distance, cover, or slowing.",
+            "brutes": "Brutes break structures, so weak wall-only plans are risky.",
+            "dawn": "Night enemies clear at dawn, so stalling can be correct.",
+            "smithing": "Ore and forge time improve direct fighting but consume day time.",
+        },
+    }
+    world = payload["world"]
+    world.update(scenario.get("world", {}))
+    payload["perception"] = {
+        "phase": world.get("phase", "midday"),
+        "time_left": world.get("time_left", 25),
+        "is_night": world.get("phase") == "night",
+        "is_dawn_soon": world.get("phase") == "night" and float(world.get("time_left", 0)) <= 15,
+        "ari": {"hp": 34 if "low HP" in " ".join(scenario.get("facts", [])) else 82, "hunger": 75 if "Hunger" in " ".join(scenario.get("facts", [])) else 42},
+        "resources": {
+            "stone": world.get("stone", 0),
+            "food": world.get("food", 0),
+            "ore": world.get("ore", 0),
+            "wall_count": world.get("wall_count", 0),
+            "aura_orb_count": world.get("aura_orb_count", 0),
+            "bow_tower_count": world.get("bow_tower_count", 0),
+            "storm_rod_count": world.get("storm_rod_count", 0),
+        },
+        "nearby_enemies": [],
+        "nearby_structures": world.get("structures", []),
+        "tactical_facts": scenario.get("facts", []),
+        "available_safe_moves": ["use_cover", "use_tower", "lure_to_aura", "flee", "stall_until_dawn"],
+    }
+    payload["current_affordances"] = [
+        {"id": key, "description": key.replace("_", " "), "available": True}
+        for key in sorted(ALLOWED_PRIORITY_KEYS)
+        if key not in {"mining", "wall", "aura_orb", "combat_training", "range", "defensive_wait"}
+    ]
+    payload["local_fallback"] = {
+        "interpretation": "Local fallback should not be copied.",
+        "priority_hints": {},
+        "grounded_plan": [],
+        "sign_strength": 0.5,
+        "resonance": 0.5,
+    }
+    return payload
 
 
 def _compact_rulebook_payload() -> dict:

@@ -189,6 +189,11 @@ func _tactical_facts(world: Node, report: Dictionary) -> Array[String]:
 			continue
 		has_flying = has_flying or bool(enemy.get("is_flying", false))
 		has_ground = has_ground or not bool(enemy.get("is_flying", false))
+		var enemy_type := str(enemy.get("type", ""))
+		if enemy_type == "runner":
+			_add_fact(facts, "Runners punish open layouts; distance, cover, slowing, or aura luring matters.")
+		elif enemy_type == "brute":
+			_add_fact(facts, "Brutes break structures; weak wall-only plans are risky.")
 
 	if has_flying:
 		_add_fact(facts, "Flying enemies ignore walls; Storm Rod or range matters.")
@@ -199,6 +204,8 @@ func _tactical_facts(world: Node, report: Dictionary) -> Array[String]:
 			_add_fact(facts, "Existing walls can become cover against ground enemies.")
 	if int(resources.get("aura_orb_count", 0)) > 0:
 		_add_fact(facts, "Aura Orb can punish enemies Ari lures through light.")
+		if _enemies_outside_aura(world):
+			_add_fact(facts, "Enemies are outside the Aura Orb; lure_to_aura can make the light matter.")
 	if int(resources.get("bow_tower_count", 0)) > 0:
 		_add_fact(facts, "A bow tower can support ranged attacks.")
 	if int(resources.get("storm_rod_count", 0)) > 0 and has_flying:
@@ -268,6 +275,31 @@ func _wall_between_ari_and_ground_enemy(world: Node) -> bool:
 				if _segment_hits_rect(ari.global_position, enemy.get("global_position"), rect.grow(10.0)):
 					return true
 	return false
+
+
+func _enemies_outside_aura(world: Node) -> bool:
+	if world == null or not world.has_method("get_enemies") or not world.has_method("get_aura_orbs"):
+		return false
+	var has_enemy := false
+	for enemy in world.call("get_enemies"):
+		if not is_instance_valid(enemy):
+			continue
+		has_enemy = true
+		var enemy_position: Vector2 = enemy.get("global_position")
+		var inside_any_aura := false
+		for aura in world.call("get_aura_orbs"):
+			if not is_instance_valid(aura):
+				continue
+			var aura_radius := float(aura.get("aura_radius"))
+			if aura_radius <= 0.0:
+				aura_radius = 92.0
+			var aura_position: Vector2 = aura.get("global_position")
+			if aura_position.distance_to(enemy_position) <= aura_radius:
+				inside_any_aura = true
+				break
+		if not inside_any_aura:
+			return true
+	return false if has_enemy else false
 
 
 func _segment_hits_rect(from: Vector2, to: Vector2, rect: Rect2) -> bool:

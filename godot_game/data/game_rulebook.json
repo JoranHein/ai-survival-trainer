@@ -11,6 +11,8 @@
     "rest": "Rest recovers HP, stamina, and fear when Ari has enough safety to spend time.",
     "library": "Library reflection turns recent events into lessons and future priority bias.",
     "dawn": "Night enemies clear at dawn. Surviving until morning can be correct when fighting is too risky.",
+    "runners": "Runners are fast ground enemies. They punish open layouts and make distance, cover, slowing, or aura luring more urgent.",
+    "brutes": "Brutes are heavy wall breakers. They make weak wall-only plans risky and reward damage, range, repair, or layered defenses.",
     "storm_rod": "Storm Rod is the dedicated answer to flying enemies and sky threats.",
     "permanent_upgrades": "Permanent upgrades help Ari survive but do not replace reading the current world."
   },

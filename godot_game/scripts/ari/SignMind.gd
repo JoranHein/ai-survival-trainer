@@ -11,6 +11,9 @@ const HINT_ORDER := [
 	"rely_on_regen",
 	"regen_on_kill",
 	"range",
+	"use_existing_wall",
+	"wait_behind_wall",
+	"use_cover",
 	"wall",
 	"aura_orb",
 	"mining",
@@ -76,6 +79,9 @@ const HINT_LABELS := {
 	"rely_on_regen": "regen",
 	"regen_on_kill": "kill regen",
 	"range": "distance",
+	"use_existing_wall": "existing cover",
+	"wait_behind_wall": "wait behind wall",
+	"use_cover": "cover",
 	"wall": "walls",
 	"aura_orb": "light",
 	"mining": "stone",
@@ -225,6 +231,9 @@ func _empty_hints() -> Dictionary:
 		"rely_on_regen": 0.0,
 		"regen_on_kill": 0.0,
 		"range": 0.0,
+		"use_existing_wall": 0.0,
+		"wait_behind_wall": 0.0,
+		"use_cover": 0.0,
 		"wall": 0.0,
 		"aura_orb": 0.0,
 		"mining": 0.0,
@@ -266,6 +275,16 @@ func _count_keyword_matches(tokens: PackedStringArray, keywords: Array) -> int:
 
 
 func _apply_phrase_overrides(hints: Dictionary, tokens: PackedStringArray) -> void:
+	if _has_any_token(tokens, ["behind", "cover"]) and _has_any_token(tokens, ["wall", "walls", "stone"]):
+		hints["use_existing_wall"] = maxf(float(hints.get("use_existing_wall", 0.0)), 0.9)
+		hints["wait_behind_wall"] = maxf(float(hints.get("wait_behind_wall", 0.0)), 0.8)
+		hints["use_cover"] = maxf(float(hints.get("use_cover", 0.0)), 0.85)
+		hints["defensive_wait"] = maxf(float(hints.get("defensive_wait", 0.0)), 0.45)
+	if _has_any_token(tokens, ["already", "enough"]) and _has_any_token(tokens, ["wall", "walls", "stone"]):
+		hints["use_existing_wall"] = maxf(float(hints.get("use_existing_wall", 0.0)), 0.88)
+		hints["use_cover"] = maxf(float(hints.get("use_cover", 0.0)), 0.82)
+		hints["wall"] = minf(float(hints.get("wall", 0.0)), 0.20)
+
 	var morning_language := _has_any_token(tokens, ["morning", "dawn", "sunrise", "daylight"])
 	if morning_language and _has_any_token(tokens, ["survive", "survival", "last", "stall", "hide", "wait", "until"]):
 		hints["survive_until_morning"] = maxf(float(hints.get("survive_until_morning", 0.0)), 0.9)
@@ -331,6 +350,8 @@ func _build_interpretation_text(hints: Dictionary) -> String:
 			return "Ari reads recovery as part of the killing plan."
 		"range":
 			return "Ari hears distance and arrows, but has no bow answer yet."
+		"use_existing_wall", "wait_behind_wall", "use_cover":
+			return "Ari reads the wall as cover that already exists."
 		"wall":
 			return "Ari reads stone and protection. He thinks walls matter."
 		"aura_orb":
@@ -581,6 +602,8 @@ func _job_matches_hint(hint_name: String, current_job: String) -> bool:
 			return current_job == "stall_until_dawn" or current_job == "hide_until_dawn" or current_job == "use_cover" or current_job == "flee"
 		"range", "build_tower":
 			return current_job == "build_bow_tower" or current_job == "use_tower"
+		"use_existing_wall", "wait_behind_wall", "use_cover":
+			return current_job == "use_cover" or current_job == "wait_or_idle"
 		"wall":
 			return current_job == "build_wall"
 		"aura_orb":
