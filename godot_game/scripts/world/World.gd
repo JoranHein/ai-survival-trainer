@@ -14,6 +14,8 @@ const DECOY_IDOL_BUILD_ID := "decoy_idol"
 const THORN_TOTEM_BUILD_ID := "thorn_totem"
 const REPAIR_BENCH_BUILD_ID := "repair_bench"
 const STORM_ROD_BUILD_ID := "storm_rod"
+const AriPerceptionScript = preload("res://scripts/ari/AriPerception.gd")
+const AriRulebookScript = preload("res://scripts/ari/AriRulebook.gd")
 
 @export var arena_margin := Vector2(48.0, 340.0)
 @export var arena_min_size := Vector2(640.0, 260.0)
@@ -82,6 +84,8 @@ var ai_survival_theory := ""
 var ai_emotion := ""
 var ari_memory := AriMemory.new()
 var lesson_book := LessonBook.new()
+var ari_rulebook := AriRulebookScript.new()
+var ari_perception := AriPerceptionScript.new()
 var latest_lesson_title := ""
 var _visual_review_staging := false
 var _ari_intent_active := false
@@ -3105,6 +3109,9 @@ func _build_ai_deep_interpretation_payload() -> Dictionary:
 	var ari_job_reason := str(ari.call("get_job_reason")) if ari != null else "Waiting"
 	return {
 		"sign_text": sign_text,
+		"rulebook": _get_ai_rulebook(),
+		"perception": _get_ai_perception(),
+		"run_build": _get_run_build_context(),
 		"ari": {
 			"run_build": _get_run_build_context(),
 			"hp": float(ari.get("hp")) if ari != null else 0.0,
@@ -3143,6 +3150,18 @@ func _build_ai_deep_interpretation_payload() -> Dictionary:
 			"resonance": sign_resonance,
 		},
 	}
+
+
+func _get_ai_rulebook() -> Dictionary:
+	if ari_rulebook != null and ari_rulebook.has_method("get_rulebook"):
+		return ari_rulebook.call("get_rulebook")
+	return {}
+
+
+func _get_ai_perception() -> Dictionary:
+	if ari_perception != null and ari_perception.has_method("build_report"):
+		return ari_perception.call("build_report", self)
+	return {}
 
 
 func _current_affordances() -> Array:

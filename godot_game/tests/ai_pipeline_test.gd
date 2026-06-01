@@ -12,6 +12,8 @@ const PermanentInsightBookScript = preload("res://scripts/ari/PermanentInsightBo
 const WisdomSynthesizerScript = preload("res://scripts/ari/WisdomSynthesizer.gd")
 const AriControllerScript = preload("res://scripts/ari/AriController.gd")
 const AriMindScript = preload("res://scripts/ari/AriMind.gd")
+const AriPerceptionScript = preload("res://scripts/ari/AriPerception.gd")
+const AriRulebookScript = preload("res://scripts/ari/AriRulebook.gd")
 const SignMindScript = preload("res://scripts/ari/SignMind.gd")
 const RunBuildScript = preload("res://scripts/ari/RunBuild.gd")
 const EnemyControllerScript = preload("res://scripts/enemies/EnemyController.gd")
@@ -38,6 +40,7 @@ func _run() -> void:
 	await _test_bridge_health_and_raw_validation(bridge)
 	_test_deep_interpretation_contract(bridge)
 	await _test_no_random_trait_runtime_contract()
+	await _test_rulebook_perception_payload_contract()
 	_test_ai_latency_cache_v1_contract(bridge)
 	await _test_world_ai_latency_commit_contract()
 	await _test_sign_panel_ai_status_line()
@@ -73,6 +76,25 @@ func _run() -> void:
 func _assert(condition: bool, message: String) -> void:
 	if not condition:
 		failures.append(message)
+
+
+func _array_has_dictionary_value(items, key: String, expected: String) -> bool:
+	if typeof(items) != TYPE_ARRAY:
+		return false
+	for item in items:
+		if typeof(item) == TYPE_DICTIONARY and str(item.get(key, "")) == expected:
+			return true
+	return false
+
+
+func _array_text_contains(items, fragment: String) -> bool:
+	if typeof(items) != TYPE_ARRAY:
+		return false
+	var needle := fragment.to_lower()
+	for item in items:
+		if str(item).to_lower().contains(needle):
+			return true
+	return false
 
 
 func _test_bridge_health_and_raw_validation(bridge: AIBridge) -> void:
@@ -234,6 +256,67 @@ func _test_no_random_trait_runtime_contract() -> void:
 	if typeof(ari_payload) == TYPE_DICTIONARY:
 		_assert(not ari_payload.has(removed_state_key), "AIBridge deep payload should not send removed random traits")
 	world.queue_free()
+
+
+func _test_rulebook_perception_payload_contract() -> void:
+	var rulebook = AriRulebookScript.new()
+	var rules: Dictionary = rulebook.call("get_rulebook")
+	_assert(not rules.is_empty(), "Ari rulebook should load a compact rule set")
+	_assert(str(rules.get("version", "")).strip_edges() != "", "Ari rulebook should include a version")
+	_assert(str(rules).find("origin_year") < 0, "Ari rulebook should not reintroduce origin-year")
+	_assert(str(rules).find("stubbornness") < 0, "Ari rulebook should not reintroduce stubbornness")
+
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should load for rulebook/perception payload checks")
+	if world_scene == null:
+		return
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	var bridge: AIBridge = world.get("ai_bridge")
+	if bridge != null:
+		bridge.force_provider_mode("local_stub")
+	world.call("commit_sign", "attack them around the corner with a bow")
+	var resource_system = world.get("resource_system")
+	if resource_system != null:
+		resource_system.call("add_stone", 40)
+	var arena: Rect2 = world.call("get_arena_rect")
+	var anchor := arena.get_center()
+	var build_grid = world.get("build_grid")
+	if build_grid != null:
+		world.call("_place_wall_at_cell", build_grid.call("world_to_cell", anchor + Vector2(48.0, 0.0)))
+		world.call("_place_bow_tower_at_cell", build_grid.call("world_to_cell", anchor + Vector2(48.0, -72.0)))
+		world.call("_place_storm_rod_at_cell", build_grid.call("world_to_cell", anchor + Vector2(112.0, -72.0)))
+	world.call("_spawn_enemy", anchor + Vector2(180.0, 0.0), "zombie")
+	world.call("_spawn_enemy", anchor + Vector2(150.0, -96.0), "flying")
+	await process_frame
+
+	var perception_builder = AriPerceptionScript.new()
+	var direct_report: Dictionary = perception_builder.call("build_report", world)
+	_assert(direct_report.has("nearby_enemies"), "Ari perception should list nearby enemies")
+	_assert(direct_report.has("nearby_structures"), "Ari perception should list nearby structures")
+	_assert(direct_report.has("tactical_facts"), "Ari perception should include tactical facts")
+	_assert(direct_report.get("nearby_enemies", []).size() <= 5, "Ari perception should cap nearby enemies")
+	_assert(direct_report.get("nearby_structures", []).size() <= 8, "Ari perception should cap nearby structures")
+	_assert(_array_has_dictionary_value(direct_report.get("nearby_enemies", []), "type", "flying"), "Ari perception should notice flying enemies")
+	_assert(_array_has_dictionary_value(direct_report.get("nearby_structures", []), "type", "wall"), "Ari perception should notice existing walls")
+	_assert(_array_has_dictionary_value(direct_report.get("nearby_structures", []), "type", "bow_tower"), "Ari perception should notice existing bow towers")
+	_assert(_array_text_contains(direct_report.get("tactical_facts", []), "Flying"), "Ari perception should explain flying enemy implications")
+
+	var payload: Dictionary = world.call("_build_ai_deep_interpretation_payload")
+	_assert(payload.has("rulebook"), "AI deep payload should include the compact rulebook")
+	_assert(payload.has("perception"), "AI deep payload should include Ari's perception report")
+	_assert(payload.has("run_build"), "AI deep payload should include run_build at top level")
+	_assert(payload.has("ari") and payload.has("world"), "AI deep payload should keep compatibility ari/world fields")
+	_assert(typeof(payload.get("rulebook", {})) == TYPE_DICTIONARY, "AI rulebook payload should be a dictionary")
+	_assert(typeof(payload.get("perception", {})) == TYPE_DICTIONARY, "AI perception payload should be a dictionary")
+	var perception: Dictionary = payload.get("perception", {})
+	_assert(perception.get("available_safe_moves", []).size() > 0, "AI perception should expose available safe moves")
+	_assert(_array_text_contains(perception.get("tactical_facts", []), "wall") or _array_text_contains(perception.get("tactical_facts", []), "tower"), "AI perception should include readable tactical facts")
+
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
 
 
 func _test_ai_latency_cache_v1_contract(bridge: AIBridge) -> void:
@@ -548,6 +631,39 @@ func _test_ai_tactical_priority_jobs() -> void:
 	_assert(cover_decision.get("job", "") == "use_cover", "cover hints should make Ari use an existing wall instead of building more")
 	_assert(str(cover_decision.get("reason", "")).to_lower().contains("wall"), "cover job should explain the wall tactic")
 
+	var grounded_cover_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 1,
+		"bow_tower_count": 0,
+		"grounded_plan": [
+			{
+				"affordance_id": "ranged_attack",
+				"priority": 0.95,
+				"reason": "The sign wants arrows around cover.",
+			},
+			{
+				"affordance_id": "use_existing_wall",
+				"priority": 0.9,
+				"reason": "The existing wall is the feasible corner.",
+			},
+		],
+		"priority_hints": {},
+	}))
+	_assert(grounded_cover_decision.get("job", "") == "use_cover", "Ari should skip an unavailable grounded plan item and use the next feasible one")
+	_assert(str(grounded_cover_decision.get("reason", "")).to_lower().contains("plan") or str(grounded_cover_decision.get("reason", "")).to_lower().contains("wall"), "grounded plan fallback should explain the feasible wall choice")
+
+	var grounded_smith_decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"ore": 0,
+		"sword_tier": 0,
+		"sword_next_ore_cost": 2,
+		"grounded_plan": [{
+			"affordance_id": "smith_sword",
+			"priority": 0.95,
+			"reason": "The sign wants the forge path.",
+		}],
+		"priority_hints": {},
+	}))
+	_assert(grounded_smith_decision.get("job", "") == "mine_ore", "A grounded smith_sword plan should mine ore first when Ari lacks ore")
+
 	var aura_decision := ari_mind.choose_daytime_job(_base_mind_context({
 		"wall_count": 1,
 		"aura_orb_count": 1,
@@ -749,6 +865,25 @@ func _test_ai_tactical_priority_jobs() -> void:
 	}))
 	_assert(broken_cover_decision.get("job", "") == "flee", "Ari should reposition when sign cover fails at night")
 	_assert(str(broken_cover_decision.get("reason", "")).to_lower().contains("wall"), "failed cover reason should mention the wall")
+
+	var grounded_dawn_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"time_left": 9.0,
+		"enemy_count": 2,
+		"nearest_enemy_distance": 120.0,
+		"ari_hp_ratio": 0.32,
+		"wall_count": 1,
+		"has_valid_cover": true,
+		"grounded_plan": [{
+			"affordance_id": "survive_until_morning",
+			"priority": 0.95,
+			"reason": "Dawn is close; survival matters more than kills.",
+		}],
+		"priority_hints": {},
+	}))
+	_assert(grounded_dawn_decision.get("job", "") != "fight_head_on", "dawn survival grounded plans should not pull low-HP Ari into combat")
+	_assert(["flee", "stall_until_dawn", "hide_until_dawn", "use_cover"].has(str(grounded_dawn_decision.get("job", ""))), "dawn survival grounded plans should preserve survival behavior")
 	ari_mind.free()
 
 

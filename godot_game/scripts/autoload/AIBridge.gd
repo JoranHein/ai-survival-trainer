@@ -367,6 +367,9 @@ func _deep_context_signature(payload: Dictionary) -> String:
 	parts.append("known=%s" % _sorted_string_values(world.get("known_enemy_types", [])))
 	parts.append("structures=%s" % _structure_signature(world.get("structures", [])))
 	parts.append("affordances=%s" % _affordance_signature(payload.get("current_affordances", [])))
+	var perception := _dictionary_value(payload.get("perception", {}))
+	parts.append("facts=%s" % _sorted_string_values(perception.get("tactical_facts", [])))
+	parts.append("safe=%s" % _sorted_string_values(perception.get("available_safe_moves", [])))
 	var latest_note := _normalize_cache_text(str(payload.get("latest_library_note", "")))
 	if latest_note != "":
 		parts.append("note=%s" % latest_note.substr(0, 80))

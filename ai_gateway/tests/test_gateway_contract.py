@@ -278,6 +278,30 @@ def test_deep_interpretation_accepts_modern_godot_payload_with_extra_request_fie
     }
 
 
+def test_deep_request_accepts_rulebook_perception_and_prompt_uses_strategy_context():
+    payload = _modern_godot_payload()
+    payload["sign_text"] = "attack them around the corner with a bow"
+    payload["rulebook"] = _compact_rulebook_payload()
+    payload["perception"] = _compact_perception_payload()
+    payload["run_build"] = {"preset": "Tower Archer", "points": {"bow": 5, "building": 3}}
+
+    request = DeepInterpretationRequest(**payload)
+
+    assert request.rulebook["rules"]["walls"] == "Walls block ground enemies but not flying enemies."
+    assert request.perception["tactical_facts"][0] == "A wall is between Ari and the nearest zombie."
+    assert request.run_build["preset"] == "Tower Archer"
+
+    prompt = deep_user_prompt(request)
+
+    assert "Rulebook:" in prompt
+    assert "Perception:" in prompt
+    assert "A wall is between Ari and the nearest zombie." in prompt
+    assert "flying enemies ignore walls" in prompt
+    assert "attack them around the corner with a bow" in prompt
+    assert "use_cover/ranged_attack" in prompt
+    assert "Do not invent unavailable actions" in prompt
+
+
 def _deep_request(sign_text: str) -> "DeepInterpretationRequest":
     from app.schemas import (
         AffordanceState,
@@ -433,6 +457,77 @@ def _modern_godot_payload() -> dict:
             "future_fallback_note": "ignored",
         },
         "benign_future_top_level": "ignored",
+    }
+
+
+def _compact_rulebook_payload() -> dict:
+    return {
+        "version": 1,
+        "rules": {
+            "walls": "Walls block ground enemies but not flying enemies.",
+            "aura_orb": "Aura Orb damages enemies inside its circle; Ari should lure enemies through it.",
+            "tower": "Bow towers create ranged attacks from height but need an existing tower.",
+            "storm_rod": "Storm Rod is the dedicated answer to flying enemies.",
+            "smithing": "Sword upgrades need ore and forge time before direct melee is wise.",
+        },
+        "affordance_notes": {
+            "use_existing_wall": "Use a wall that already exists; do not build more wall unless no cover exists.",
+            "ranged_attack": "Requires tower/range support.",
+            "smith_sword": "Requires ore.",
+        },
+    }
+
+
+def _compact_perception_payload() -> dict:
+    return {
+        "phase": "night",
+        "time_left": 14,
+        "is_night": True,
+        "is_dawn_soon": True,
+        "ari": {"hp": 74, "hunger": 48, "current_job": "use_cover"},
+        "resources": {"stone": 12, "food": 2, "ore": 1},
+        "run_build": {"preset": "Tower Archer"},
+        "sword_tier": 1,
+        "nearby_enemies": [
+            {
+                "type": "zombie",
+                "distance": 96,
+                "direction": "east",
+                "danger": "medium",
+                "is_flying": False,
+                "tactical_note": "Ground enemy can be delayed by walls.",
+            },
+            {
+                "type": "flying",
+                "distance": 128,
+                "direction": "north-east",
+                "danger": "high",
+                "is_flying": True,
+                "tactical_note": "Flying enemies ignore walls.",
+            },
+        ],
+        "nearby_structures": [
+            {
+                "type": "wall",
+                "distance": 34,
+                "direction": "east",
+                "condition": "intact",
+                "tactical_use": "existing cover",
+            },
+            {
+                "type": "bow_tower",
+                "distance": 70,
+                "direction": "north",
+                "condition": "intact",
+                "tactical_use": "ranged attacks",
+            },
+        ],
+        "tactical_facts": [
+            "A wall is between Ari and the nearest zombie.",
+            "Dawn is soon; stalling is valid.",
+            "Flying enemies ignore walls.",
+        ],
+        "available_safe_moves": ["use_cover", "use_tower", "stall_until_dawn"],
     }
 
 

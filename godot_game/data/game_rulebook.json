@@ -1,0 +1,41 @@
+{
+  "version": "ari_strategy_rulebook_v1",
+  "rules": {
+    "signs": "The sign is freeform intent, not command slots. Ari may interpret metaphorically.",
+    "walls": "Walls block and delay ground enemies. Flying enemies ignore walls, so wall-only plans fail against wings.",
+    "aura_orb": "Aura Orb damages enemies inside its circle. It works best when Ari lures enemies through the light.",
+    "tower": "Bow towers give height and ranged attacks. Ranged attack requires an existing tower or tower preparation.",
+    "training": "Combat dummy and sword training improve fighting readiness before Ari risks direct contact.",
+    "forge": "Ore plus forge time can improve sword tier. Smithing is useful but costs day preparation time.",
+    "farming": "Food and eating reduce hunger pressure. Hunger can make every plan less safe.",
+    "rest": "Rest recovers HP, stamina, and fear when Ari has enough safety to spend time.",
+    "library": "Library reflection turns recent events into lessons and future priority bias.",
+    "dawn": "Night enemies clear at dawn. Surviving until morning can be correct when fighting is too risky.",
+    "storm_rod": "Storm Rod is the dedicated answer to flying enemies and sky threats.",
+    "permanent_upgrades": "Permanent upgrades help Ari survive but do not replace reading the current world."
+  },
+  "affordance_notes": {
+    "use_existing_wall": "Use cover that already exists. Do not build more wall when the sign clearly means stand behind a current wall.",
+    "build_wall": "Build wall only when no usable cover exists or stronger cover is the intended preparation.",
+    "wait_behind_wall": "Hold safe position behind existing cover while danger approaches.",
+    "use_cover": "Use wall, tower, or other safe geometry to keep danger away.",
+    "place_aura_orb": "Build the light circle when Ari needs a kill zone and can afford it.",
+    "lure_to_aura": "Move so enemies cross the aura instead of fighting them directly.",
+    "build_tower": "Create ranged height when Ari has time and stone.",
+    "use_tower": "Use an existing tower for distance and ranged attacks.",
+    "ranged_attack": "Use ranged pressure from a tower or range-capable position.",
+    "build_storm_rod": "Build anti-flying support when wings or sky threats matter.",
+    "anti_flying": "Prefer storm rod or ranged answers over wall-only safety.",
+    "sky_answer": "Treat flying enemies as a separate tactical problem.",
+    "mine_ore": "Mine ore before smithing if Ari lacks ore.",
+    "smith_sword": "Improve sword only when there is enough ore and time.",
+    "train_sword": "Practice before direct sword fighting.",
+    "fight_head_on": "Direct fighting is valid only when Ari is ready enough and not overwhelmed.",
+    "stall_until_dawn": "Delay until dawn when survival matters more than kills.",
+    "hide_until_dawn": "Use cover, distance, or towers to live until morning.",
+    "farm_food": "Make food before hunger becomes panic.",
+    "eat_food": "Eat stored food when hunger is dangerous.",
+    "rest": "Recover when Ari is safe enough to spend time.",
+    "reflect_library": "Use the library when the sign asks for learning or recent mistakes matter."
+  }
+}

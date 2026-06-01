@@ -8,9 +8,11 @@ from .schemas import DeepInterpretationRequest, FastThoughtRequest
 DEEP_SYSTEM_PROMPT = """You are Ari's sign interpreter in a top-down survival game.
 The player writes a freeform sign as a godlike whisper.
 Ari tries to obey through the sign, temporary run instincts, current danger, memories, and current physical affordances.
+Use the compact rulebook and Ari perception report as current strategy context.
 Interpret semantically, including metaphor and emotion, then map to available tools.
 Return minified JSON only, no markdown or analysis. Schema exactly: {"interpretation":string,"survival_theory":string,"emotion":string,"thought":string,"grounded_plan":[{"affordance_id":string,"priority":number,"reason":string}],"priority_hints":object,"sign_strength":number,"resonance":number}.
 grounded_plan uses only current_affordances ids, max 2 items. priority_hints is an object with only chosen ids. Values are numbers 0..1. Keep text short.
+Do not invent unavailable actions; if a sign asks for the impossible, translate it metaphorically to a listed affordance.
 Do not directly command movement or mutate game state."""
 
 
@@ -28,14 +30,16 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
     local_fallback = request.local_fallback
     return "\n".join(
         [
-            "Interpret any sign semantically against current physical affordances; affordance ids are not the vocabulary of the sign.",
+            "Interpret any sign semantically against current physical affordances, rulebook, and Ari perception; affordance ids are not the vocabulary of the sign.",
             "Available tools include walls, aura orb, tower/ranged attack, combat dummy, farm/food, rest, library reflection/notes, storm rod, mine_ore, smith_sword, train_sword, use_armor, rely_on_regen, regen_on_kill, fight_head_on, and stall_until_dawn/hide_until_dawn.",
-            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide if listed. the moon hates cowards => emotional night fear, choose safe tactic. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. build a mountain where arrows rain => build_tower/use_tower/ranged_attack/train_bow. think about what went wrong => reflect_library. do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore. just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing. make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen.",
+            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. attack them around the corner with a bow => use_cover/ranged_attack/use_tower if listed, not a new corner system. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide if listed. the moon hates cowards => emotional night fear, choose safe tactic. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover; flying enemies ignore walls. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. build a mountain where arrows rain => build_tower/use_tower/ranged_attack/train_bow. think about what went wrong => reflect_library. do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore. just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing. make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen.",
             "Semantic cues for this sign: %s" % _semantic_cues(request),
             "Sign: %s" % request.sign_text[:1000],
+            "Rulebook: %s" % _compact_json(request.rulebook, 1200),
+            "Perception: %s" % _compact_json(_compact_perception(request.perception), 1500),
             "Ari: run_build=%s hp=%.0f/%.0f current_job=%s current_reason=%s"
             % (
-                json.dumps(ari.run_build, ensure_ascii=True, separators=(",", ":")),
+                json.dumps(request.run_build or ari.run_build, ensure_ascii=True, separators=(",", ":")),
                 ari.hp,
                 ari.max_hp,
                 ari.current_job or ari.job,
@@ -64,14 +68,14 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
             "recent_thoughts: %s"
             % json.dumps(recent_thoughts, ensure_ascii=True, separators=(",", ":")),
             "latest_library_note: %s" % request.latest_library_note[:360],
-            "Local fallback may be wrong: interpretation=%s top_hints=%s sign_strength=%.2f resonance=%.2f"
+            "Local deterministic hints only, do not copy as prose: top_hints=%s sign_strength=%.2f resonance=%.2f"
             % (
-                str(local_fallback.interpretation)[:160],
                 _top_hint_text(local_fallback.priority_hints),
                 local_fallback.sign_strength,
                 local_fallback.resonance,
             ),
-            "Return JSON only. If a cue says not wall/cover, exclude build_wall/use_existing_wall/wait_behind_wall/use_cover unless no other listed affordance fits.",
+            "Write Ari's own current interpretation from sign, rulebook, perception, and listed affordances.",
+            "Return JSON only. Do not invent unavailable actions. If a cue says not wall/cover, exclude build_wall/use_existing_wall/wait_behind_wall/use_cover unless no other listed affordance fits.",
         ]
     )
 
@@ -90,6 +94,41 @@ def _compact_affordances(request: DeepInterpretationRequest) -> tuple[str, str]:
             reason = item.reason_unavailable.strip() or "unavailable"
             unavailable.append("%s(%s)" % (item.id, reason[:48]))
     return ",".join(available) or "none", ",".join(unavailable) or "none"
+
+
+def _compact_perception(perception: dict[str, object]) -> dict[str, object]:
+    if not isinstance(perception, dict) or not perception:
+        return {}
+    return {
+        "phase": perception.get("phase", ""),
+        "time_left": perception.get("time_left", 0),
+        "is_night": perception.get("is_night", False),
+        "is_dawn_soon": perception.get("is_dawn_soon", False),
+        "ari": perception.get("ari", {}),
+        "resources": perception.get("resources", {}),
+        "run_build": perception.get("run_build", {}),
+        "sword_tier": perception.get("sword_tier", 0),
+        "latest_library_note": perception.get("latest_library_note", {}),
+        "nearby_enemies": _slice_list(perception.get("nearby_enemies", []), 5),
+        "nearby_structures": _slice_list(perception.get("nearby_structures", []), 8),
+        "tactical_facts": _slice_list(perception.get("tactical_facts", []), 10),
+        "available_safe_moves": _slice_list(perception.get("available_safe_moves", []), 10),
+    }
+
+
+def _slice_list(value: object, max_items: int) -> list[object]:
+    if not isinstance(value, list):
+        return []
+    return value[:max_items]
+
+
+def _compact_json(value: object, max_chars: int) -> str:
+    if not value:
+        return "none"
+    text = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "..."
 
 
 def _semantic_cues(request: DeepInterpretationRequest) -> str:

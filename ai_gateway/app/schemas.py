@@ -143,6 +143,9 @@ class LocalFallback(TolerantRequestModel):
 
 class DeepInterpretationRequest(TolerantRequestModel):
     sign_text: str
+    rulebook: dict[str, Any] = Field(default_factory=dict)
+    perception: dict[str, Any] = Field(default_factory=dict)
+    run_build: dict[str, Any] = Field(default_factory=dict)
     ari: AriState
     world: WorldState
     local_fallback: LocalFallback

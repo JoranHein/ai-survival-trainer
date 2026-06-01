@@ -268,6 +268,10 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 		if stone < wall_cost:
 			return _job("flee", "Enemies remain and there is no cover yet")
 
+	var grounded_job := _job_from_grounded_plan(context, false)
+	if not grounded_job.is_empty():
+		return grounded_job
+
 	if active_enemy_count <= 0 and (food_preference > 0.20 or hunger > 42.0) and food < 3:
 		return _job("farm_food", "Need food before night" if sign_food_preference <= 0.0 else "Sign points to food")
 
@@ -471,6 +475,9 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 		return _job("fight_head_on", "Sign rejects hiding; fight ground enemies directly")
 	if nearest_enemy_distance <= night_flee_enemy_distance:
 		return _job("flee", "Enemies are too close; move")
+	var grounded_job := _job_from_grounded_plan(context, true)
+	if not grounded_job.is_empty():
+		return grounded_job
 	if wants_dawn_survival and (has_valid_cover or has_valid_aura or has_valid_tower):
 		return _job("hide_until_dawn" if has_valid_cover else "stall_until_dawn", "Survive until morning; do not spend life chasing kills")
 	if wants_tower and not has_valid_tower and not has_valid_aura and not has_valid_cover:
@@ -621,6 +628,154 @@ func thought_for_damage(hp: float, max_hp: float) -> String:
 	if max_hp > 0.0 and hp / max_hp <= 0.3:
 		return "That hurt. I am too close to dying."
 	return "That hurt. I do not want them near me."
+
+
+func _job_from_grounded_plan(context: Dictionary, is_night: bool) -> Dictionary:
+	var plan := _grounded_plan(context)
+	for item in plan:
+		var affordance_id := str(item.get("affordance_id", item.get("id", "")))
+		var job := _job_for_affordance(affordance_id, context, is_night)
+		if not job.is_empty():
+			return job
+	return {}
+
+
+func _job_for_affordance(affordance_id: String, context: Dictionary, is_night: bool) -> Dictionary:
+	var wall_count := int(context.get("wall_count", 0))
+	var aura_orb_count := int(context.get("aura_orb_count", 0))
+	var bow_tower_count := int(context.get("bow_tower_count", 0))
+	var storm_rod_count := int(context.get("storm_rod_count", 0))
+	var stone := int(context.get("stone", 0))
+	var ore := int(context.get("ore", 0))
+	var wall_cost := int(context.get("wall_cost", 0))
+	var aura_orb_cost := int(context.get("aura_orb_cost", 0))
+	var bow_tower_cost := int(context.get("bow_tower_cost", 0))
+	var storm_rod_cost := int(context.get("storm_rod_cost", 0))
+	var sword_next_ore_cost := int(context.get("sword_next_ore_cost", 0))
+	var damaged_structure_count := int(context.get("damaged_structure_count", 0))
+	var has_valid_cover := bool(context.get("has_valid_cover", wall_count > 0))
+	var has_valid_aura := bool(context.get("has_valid_aura", aura_orb_count > 0))
+	var has_valid_tower := bool(context.get("has_valid_tower", bow_tower_count > 0))
+	var enemy_count := int(context.get("enemy_count", 0))
+	var enemy_type_counts := _enemy_type_counts(context)
+	var ari_hp_ratio := clampf(float(context.get("ari_hp_ratio", 1.0)), 0.0, 1.0)
+	var combat_stats := _combat_stats(context)
+
+	match affordance_id:
+		"use_existing_wall", "wait_behind_wall", "use_cover", "hide":
+			if is_night:
+				if has_valid_cover:
+					return _job("use_cover", "Grounded plan uses the existing wall")
+				if not has_valid_aura and not has_valid_tower:
+					return _job("flee", "The wall is gone; try the next safe answer")
+				return {}
+			if wall_count > 0:
+				return _job("use_cover", "Grounded plan uses the existing wall")
+			return {}
+		"lure_to_aura":
+			if is_night:
+				return _job("lure_to_aura", "Grounded plan lures danger through light") if has_valid_aura else {}
+			return _job("lure_to_aura", "Grounded plan lures danger through light") if aura_orb_count > 0 else {}
+		"place_aura_orb":
+			if is_night:
+				return {}
+			if aura_orb_count > 0:
+				return _job("lure_to_aura", "Aura already exists; use the light")
+			if stone < aura_orb_cost:
+				return _job("mine_stone", "Grounded plan needs stone for Aura Orb")
+			return _job("place_aura_orb", "Grounded plan wants the light circle")
+		"use_tower", "ranged_attack", "train_bow":
+			if is_night:
+				return _job("use_tower", "Grounded plan uses tower range") if has_valid_tower else {}
+			if bow_tower_count > 0:
+				return _job("use_tower", "Grounded plan uses tower range")
+			return {}
+		"build_tower":
+			if is_night:
+				return {}
+			if bow_tower_count > 0:
+				return _job("use_tower", "Tower already exists; use range")
+			if stone < bow_tower_cost:
+				return _job("mine_stone", "Grounded plan needs stone for tower")
+			return _job("build_bow_tower", "Grounded plan wants height and arrows")
+		"build_wall":
+			if is_night:
+				return {}
+			if stone < wall_cost:
+				return _job("mine_stone", "Grounded plan needs stone for wall")
+			return _job("build_wall", "Grounded plan wants new cover")
+		"build_storm_rod", "anti_flying", "sky_answer":
+			if is_night:
+				return _job("use_tower", "Storm is not ready; use range against the sky") if has_valid_tower else {}
+			if storm_rod_count > 0:
+				return _job("use_tower", "Storm Rod exists; keep ranged safety") if bow_tower_count > 0 else {}
+			if stone < storm_rod_cost:
+				return _job("mine_stone", "Grounded plan needs stone for storm rod")
+			return _job("build_storm_rod", "Grounded plan answers wings with storm")
+		"farm_food":
+			return _job("farm_food", "Grounded plan treats food as safety") if not is_night else {}
+		"eat", "eat_food":
+			if int(context.get("food", 0)) > 0:
+				return _job("eat_food", "Grounded plan treats food as safety")
+			return _job("farm_food", "Grounded plan needs food first") if not is_night else {}
+		"rest":
+			return _job("rest", "Grounded plan asks for recovery") if not is_night else {}
+		"reflect_library":
+			return _job("reflect_library", "Grounded plan asks Ari to study the mistake") if not is_night else {}
+		"repair":
+			if damaged_structure_count > 0:
+				return _job("repair_structure", "Grounded plan repairs damaged safety")
+			return _job("wait_or_idle", "Grounded plan wants repair, but nothing is broken yet") if not is_night else {}
+		"mine_ore":
+			return _job("mine_ore", "Grounded plan points to ore") if not is_night else {}
+		"smith_sword":
+			if is_night:
+				return {}
+			if sword_next_ore_cost > 0 and ore < sword_next_ore_cost:
+				return _job("mine_ore", "Grounded plan needs ore before smithing")
+			if sword_next_ore_cost > 0:
+				return _job("smith_sword", "Grounded plan wants a stronger sword")
+			return {}
+		"train_sword":
+			return _job("train_sword", "Grounded plan wants sword practice") if not is_night else {}
+		"train_combat", "prepare_weapon":
+			return _job("train_combat", "Grounded plan wants combat preparation") if not is_night else {}
+		"fight", "fight_head_on":
+			if _can_fight_head_on(combat_stats, ari_hp_ratio, enemy_type_counts, maxi(enemy_count, 1)):
+				return _job("fight_head_on", "Grounded plan accepts direct combat")
+			return _job("train_combat", "Grounded plan wants fighting, but Ari needs training") if not is_night else {}
+		"stall_until_dawn", "hide_until_dawn", "survive_until_morning", "avoid_killing":
+			if is_night:
+				if has_valid_cover:
+					return _job("hide_until_dawn", "Grounded plan says to survive until morning")
+				if has_valid_aura or has_valid_tower:
+					return _job("stall_until_dawn", "Grounded plan says to survive until morning")
+				return _job("flee", "Grounded plan needs distance until dawn")
+			return _job("wait_or_idle", "Grounded plan saves strength for night")
+		"flee", "kite":
+			return _job("flee", "Grounded plan asks for distance") if is_night or enemy_count > 0 else {}
+	return {}
+
+
+func _grounded_plan(context: Dictionary) -> Array:
+	var raw_plan = context.get("grounded_plan", [])
+	if typeof(raw_plan) != TYPE_ARRAY:
+		return []
+	var result := []
+	for item in raw_plan:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var priority := clampf(float(item.get("priority", 0.0)), 0.0, 1.0)
+		if priority <= 0.0:
+			continue
+		result.append({
+			"affordance_id": str(item.get("affordance_id", item.get("id", ""))),
+			"priority": priority,
+			"reason": str(item.get("reason", "")),
+		})
+		if result.size() >= 4:
+			break
+	return result
 
 
 func _priority_hints(context: Dictionary) -> Dictionary:
