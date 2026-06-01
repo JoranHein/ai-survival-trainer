@@ -2,11 +2,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.schemas import (
     ALLOWED_PRIORITY_KEYS,
+    DeepInterpretationRequest,
     DeepInterpretationResponse,
     fallback_deep_response,
     sanitize_deep_response,
@@ -211,6 +213,71 @@ def test_fallback_deep_response_maps_legacy_local_hints_and_grounded_plan():
     DeepInterpretationResponse(**response)
 
 
+def test_deep_interpretation_accepts_modern_godot_payload_with_extra_request_fields(monkeypatch):
+    import app.main as gateway_main
+
+    payload = _modern_godot_payload()
+
+    request = DeepInterpretationRequest(**payload)
+    assert request.world.food == 2
+    assert request.world.ore == 3
+    assert request.world.bow_tower_count == 1
+    assert request.world.storm_rod_count == 1
+    assert request.world.sword_tier == 2
+    assert not hasattr(request.world, "benign_future_world_field")
+    assert not hasattr(request.ari, "benign_future_ari_field")
+
+    async def fake_call_deep_model(_request, _settings):
+        return {
+            "interpretation": "Ari reads the wall and tower as cover while watching the sky.",
+            "thought": "The wall helps, but I should notice the sky too.",
+            "survival_theory": "cover_and_sky",
+            "emotion": "careful",
+            "grounded_plan": [
+                {
+                    "affordance_id": "use_existing_wall",
+                    "priority": 0.8,
+                    "reason": "The existing wall is valid cover.",
+                },
+                {
+                    "affordance_id": "build_storm_rod",
+                    "priority": 0.7,
+                    "reason": "Flying enemies need a sky answer.",
+                },
+            ],
+            "priority_hints": {
+                "use_existing_wall": 0.8,
+                "build_storm_rod": 0.7,
+                "unknown_model_key": 1.0,
+            },
+            "sign_strength": 0.9,
+            "resonance": 0.85,
+            "extra_response_field": "must not pass response schema",
+        }
+
+    monkeypatch.setattr(gateway_main, "call_deep_model", fake_call_deep_model)
+
+    client = TestClient(gateway_main.app)
+    response = client.post("/ai/deep-interpretation", json=payload)
+
+    assert response.status_code == 200
+    assert "extra_forbidden" not in response.text
+    validated = DeepInterpretationResponse(**response.json())
+    assert validated.grounded_plan[0]["affordance_id"] == "use_existing_wall"
+    assert validated.priority_hints["build_storm_rod"] == 0.7
+    assert "unknown_model_key" not in validated.priority_hints
+    assert set(response.json()) == {
+        "interpretation",
+        "thought",
+        "survival_theory",
+        "emotion",
+        "grounded_plan",
+        "priority_hints",
+        "sign_strength",
+        "resonance",
+    }
+
+
 def _deep_request(sign_text: str) -> "DeepInterpretationRequest":
     from app.schemas import (
         AffordanceState,
@@ -273,6 +340,100 @@ def _deep_request(sign_text: str) -> "DeepInterpretationRequest":
         recent_thoughts=["The wall is not safety anymore."],
         latest_library_note="# Day 2\n\nThe flying ones ignored stone.",
     )
+
+
+def _modern_godot_payload() -> dict:
+    return {
+        "sign_text": "stand behind the wall while the sky watches",
+        "ari": {
+            "run_build": {"preset": "Tower Archer", "points": {"bow": 5, "building": 3}},
+            "hp": 86,
+            "max_hp": 108,
+            "current_job": "use_cover",
+            "current_reason": "Use the existing wall while enemies approach",
+            "job": "use_cover",
+            "reason": "Use the existing wall while enemies approach",
+            "hunger": 42.0,
+            "stamina": 76.0,
+            "fear": 31.0,
+            "benign_future_ari_field": {"ignored": True},
+        },
+        "world": {
+            "day": 3,
+            "phase": "night",
+            "time_left": 18,
+            "stone": 12,
+            "food": 2,
+            "ore": 3,
+            "wall_count": 2,
+            "aura_orb_count": 1,
+            "bow_tower_count": 1,
+            "storm_rod_count": 1,
+            "sword_tier": 2,
+            "enemy_count": 4,
+            "enemy_type_counts": {"zombie": 1, "runner": 1, "brute": 1, "flying": 1},
+            "known_enemy_types": ["zombie", "runner", "brute", "flying"],
+            "structures": [
+                {"type": "wall", "status": "damaged", "hp_ratio": 0.52},
+                {"type": "bow_tower", "status": "intact", "shots_fired": 3},
+                {"type": "storm_rod", "status": "intact", "charge": 0.4},
+            ],
+            "benign_future_world_field": {"ignored": True},
+        },
+        "current_affordances": [
+            {
+                "id": "use_existing_wall",
+                "description": "Move near an existing wall so enemies must hit or go around it before reaching Ari.",
+                "available": True,
+                "reason_unavailable": "",
+                "debug_score": 0.8,
+            },
+            {
+                "id": "use_tower",
+                "description": "Use an existing tower perch to keep distance from ground enemies.",
+                "available": True,
+                "reason_unavailable": "",
+            },
+            {
+                "id": "build_storm_rod",
+                "description": "Build a Storm Rod as an anti-flying sky defense.",
+                "available": True,
+                "reason_unavailable": "",
+            },
+            {
+                "id": "mine_ore",
+                "description": "Mine low-tier ore for sword upgrades at the forge.",
+                "available": True,
+                "reason_unavailable": "",
+            },
+        ],
+        "recent_thoughts": [
+            "The wall buys time.",
+            "The flying ones do not care about stone.",
+        ],
+        "latest_library_note": "# Day 2\n\nTower saved me from teeth, not wings.",
+        "local_fallback": {
+            "interpretation": "Ari locally reads the sign as wall cover with sky danger.",
+            "priority_hints": {
+                "use_existing_wall": 0.8,
+                "use_cover": 0.7,
+                "build_storm_rod": 0.6,
+            },
+            "emotion": "careful",
+            "grounded_plan": [
+                {
+                    "affordance_id": "use_existing_wall",
+                    "priority": 0.8,
+                    "reason": "The wall already exists.",
+                    "future_reason_detail": "ignored",
+                }
+            ],
+            "sign_strength": 0.75,
+            "resonance": 0.7,
+            "future_fallback_note": "ignored",
+        },
+        "benign_future_top_level": "ignored",
+    }
 
 
 def test_deep_user_prompt_includes_cover_context_without_format_error():

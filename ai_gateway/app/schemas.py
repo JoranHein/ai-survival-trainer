@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ALLOWED_PRIORITY_KEYS = {
@@ -64,12 +64,35 @@ ALLOWED_PRIORITY_KEYS = {
 
 MAX_GROUNDED_PLAN_ITEMS = 4
 
+FORBIDDEN_REQUEST_KEYS = {
+    "personality",
+    "personality_summary",
+    "era",
+    "origin_year",
+    "stubbornness",
+    "perseverance",
+    "confusion",
+}
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class AriState(StrictModel):
+class TolerantRequestModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_forbidden_request_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            forbidden = sorted(FORBIDDEN_REQUEST_KEYS.intersection(str(key) for key in data.keys()))
+            if forbidden:
+                raise ValueError(f"Forbidden request field(s): {', '.join(forbidden)}")
+        return data
+
+
+class AriState(TolerantRequestModel):
     run_build: dict[str, Any] = Field(default_factory=dict)
     hp: float = 100.0
     max_hp: float = 100.0
@@ -79,12 +102,12 @@ class AriState(StrictModel):
     reason: str = ""
 
 
-class StructureState(StrictModel):
+class StructureState(TolerantRequestModel):
     type: str = ""
     status: str = ""
 
 
-class WorldState(StrictModel):
+class WorldState(TolerantRequestModel):
     day: int = 1
     phase: str = "morning"
     time_left: float = 0.0
@@ -102,14 +125,14 @@ class WorldState(StrictModel):
     structures: list[StructureState] = Field(default_factory=list)
 
 
-class AffordanceState(StrictModel):
+class AffordanceState(TolerantRequestModel):
     id: str
     description: str = ""
     available: bool = True
     reason_unavailable: str = ""
 
 
-class LocalFallback(StrictModel):
+class LocalFallback(TolerantRequestModel):
     interpretation: str = ""
     priority_hints: dict[str, Any] = Field(default_factory=dict)
     emotion: str = ""
@@ -118,7 +141,7 @@ class LocalFallback(StrictModel):
     resonance: float = 0.0
 
 
-class DeepInterpretationRequest(StrictModel):
+class DeepInterpretationRequest(TolerantRequestModel):
     sign_text: str
     ari: AriState
     world: WorldState
@@ -139,7 +162,7 @@ class DeepInterpretationResponse(StrictModel):
     resonance: float
 
 
-class FastThoughtRequest(StrictModel):
+class FastThoughtRequest(TolerantRequestModel):
     event: str = ""
     ari: dict[str, Any] = Field(default_factory=dict)
     world: dict[str, Any] = Field(default_factory=dict)
