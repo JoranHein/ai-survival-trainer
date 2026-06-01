@@ -32,8 +32,9 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
         [
             "Interpret any sign semantically against current physical affordances, rulebook, and Ari perception; affordance ids are not the vocabulary of the sign.",
             "Prefer concrete perception facts and available affordances over generic examples. If perception says a tool already exists, prefer using it before building another copy.",
-            "Available tools include walls, aura orb, tower/ranged attack, combat dummy, farm/food, rest, library reflection/notes, storm rod, mine_ore, smith_sword, train_sword, use_armor, rely_on_regen, regen_on_kill, fight_head_on, and stall_until_dawn/hide_until_dawn.",
-            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. attack them around the corner with a bow => use_cover/ranged_attack/use_tower if listed, not a new corner system. the floor should fight or make the room dangerous => lure_to_aura/build_spike_trap/build_tar_pit/use_thorns if listed. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide if listed. the moon hates cowards => emotional night fear, choose safe tactic. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover; flying enemies ignore walls. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. build a mountain where arrows rain => build_tower/use_tower/ranged_attack/train_bow. think about what went wrong => reflect_library. do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore. just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing. make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen.",
+            "Available tools include walls, aura orb, tower/ranged attack, combat dummy, farm/food, rest, library, storm rod, mine_ore, smith_sword, train_sword, use_armor, rely_on_regen, regen_on_kill, fight_head_on, stall_until_dawn/hide_until_dawn.",
+            "Direct combat/no-hide signs: grounded_plan[0] should be train_combat/prepare_weapon/train_sword/smith_sword/mine_ore/fight_head_on and theory should be combat prep/sword/direct fighting. Do not use tower/range as top plan for generic killing unless sign names bow/arrows/range/tower.",
+            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. attack them around the corner with a bow => use_cover/ranged_attack/use_tower. the floor should fight or make the room dangerous => lure_to_aura/build_spike_trap/build_tar_pit/use_thorns. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide. the moon hates cowards => safe night tactic. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover; flying enemies ignore walls. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. build a mountain where arrows rain => build_tower/use_tower/ranged_attack/train_bow. think about what went wrong => reflect_library. do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore. prep can be train_combat/prepare_weapon. just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing. make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen.",
             "Semantic cues for this sign: %s" % _semantic_cues(request),
             "Sign: %s" % request.sign_text[:1000],
             "Rulebook: %s" % _compact_json(request.rulebook, 1200),
@@ -76,7 +77,7 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
                 local_fallback.resonance,
             ),
             "Write Ari's own current interpretation from sign, rulebook, perception, and listed affordances.",
-            "Return JSON only. Do not invent unavailable actions. If a cue says not wall/cover, exclude build_wall/use_existing_wall/wait_behind_wall/use_cover unless no other listed affordance fits.",
+            "Return JSON only. Do not invent unavailable actions. If a cue says not wall/cover, exclude wall/cover ids unless no other listed affordance fits.",
         ]
     )
 
@@ -135,6 +136,9 @@ def _compact_json(value: object, max_chars: int) -> str:
 def _semantic_cues(request: DeepInterpretationRequest) -> str:
     sign = request.sign_text.lower()
     cues: list[str] = []
+    ranged_language = any(word in sign for word in ["bow", "arrow", "arrows", "range", "ranged", "tower"])
+    direct_combat_language = any(word in sign for word in ["kill", "killing", "fight", "attack", "head on", "head-on", "sword", "blade", "weapon"])
+    no_hide_language = "hide" in sign and any(word in sign for word in ["not", "don't", "dont", "never", "no "])
     if ("behind" in sign or "cover" in sign) and "wall" in sign and request.world.wall_count > 0:
         cues.append("existing wall cover; prefer use_existing_wall/wait_behind_wall/use_cover; build_wall=0")
     if "circle" in sign and ("dead" in sign or "eat" in sign or "teeth" in sign):
@@ -153,8 +157,8 @@ def _semantic_cues(request: DeepInterpretationRequest) -> str:
         cues.append("reflection; prefer reflect_library")
     if any(word in sign for word in ["sword", "blade", "forge", "smith", "ore", "iron"]):
         cues.append("sword path; prefer mine_ore/smith_sword/train_sword before fight_head_on")
-    if any(word in sign for word in ["kill", "killing", "fight", "attack"]) and ("hide" in sign or "enemies" in sign or "dead" in sign):
-        cues.append("aggressive melee; prefer fight_head_on/train_sword/smith_sword, avoid hide_until_dawn")
+    if direct_combat_language and not ranged_language and (no_hide_language or "head on" in sign or "head-on" in sign or "enemies" in sign or "sword" in sign or "weapon" in sign):
+        cues.append("explicit no-hide/direct killing; grounded_plan[0] should be train_combat/prepare_weapon/train_sword/smith_sword/mine_ore/fight_head_on; tower/ranged only secondary if melee is clearly suicidal")
     if any(word in sign for word in ["morning", "dawn", "sunrise"]) and any(word in sign for word in ["survive", "last", "stall", "hide", "wait"]):
         cues.append("dawn survival; prefer stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing")
     if "life" in sign and any(word in sign for word in ["kill", "dead", "die", "sword"]):

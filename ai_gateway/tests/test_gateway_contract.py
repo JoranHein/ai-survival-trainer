@@ -328,8 +328,8 @@ INTELLIGENCE_CONTRACT_SCENARIOS = [
         "sign": "do not hide, focus on killing enemies",
         "world": {"ore": 3, "sword_tier": 0, "enemy_count": 0},
         "facts": ["Daytime prep can improve the sword before fighting."],
-        "expected_plan": ["smith_sword", "train_sword", "fight_head_on"],
-        "reject": ["hide_until_dawn"],
+        "expected_plan": ["smith_sword", "train_sword", "fight_head_on", "mine_ore", "prepare_weapon", "train_combat"],
+        "reject": ["hide_until_dawn", "stall_until_dawn", "use_tower", "ranged_attack", "build_tower", "train_bow"],
     },
     {
         "sign": "just survive until morning",
@@ -434,6 +434,27 @@ def test_prompt_prioritizes_world_perception_over_generic_examples():
     assert "If perception says a tool already exists, prefer using it before building another copy" in prompt
     assert "the floor should fight" in prompt
     assert "make the room dangerous" in prompt
+
+
+def test_prompt_direct_combat_rejects_default_tower_top_plan():
+    payload = _intelligence_payload(
+        {
+            "sign": "do not hide, focus on killing enemies",
+            "world": {"ore": 3, "sword_tier": 0, "enemy_count": 0, "bow_tower_count": 0},
+            "facts": ["Daytime prep can improve the sword before fighting."],
+            "expected_plan": ["smith_sword", "train_sword", "fight_head_on"],
+            "reject": ["use_tower"],
+        }
+    )
+
+    prompt = deep_user_prompt(DeepInterpretationRequest(**payload))
+
+    assert "Direct combat/no-hide signs" in prompt
+    assert "grounded_plan[0]" in prompt
+    assert "train_combat/prepare_weapon/train_sword/smith_sword/mine_ore/fight_head_on" in prompt
+    assert "theory should be combat prep/sword/direct fighting" in prompt
+    assert "Do not use tower/range as top plan for generic killing" in prompt
+    assert "explicit no-hide/direct killing" in prompt
 
 
 def _deep_request(sign_text: str) -> "DeepInterpretationRequest":

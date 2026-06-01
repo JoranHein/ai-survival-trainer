@@ -88,7 +88,8 @@ SCENARIOS = [
         "world": {"phase": "midday", "ore": 3, "sword_tier": 0, "enemy_count": 0},
         "facts": ["Daytime prep can improve the sword before fighting."],
         "expected_any": {"smith_sword", "train_sword", "mine_ore", "fight_head_on"},
-        "forbidden_top": {"hide_until_dawn", "stall_until_dawn"},
+        "expected_top": {"smith_sword", "train_sword", "mine_ore", "fight_head_on", "prepare_weapon", "train_combat"},
+        "forbidden_top": {"hide_until_dawn", "stall_until_dawn", "use_tower", "ranged_attack", "build_tower", "train_bow"},
     },
     {
         "id": "survive_morning",
@@ -205,8 +206,9 @@ def probe_scenario(url: str, api_key: str, scenario: dict[str, Any], timeout: fl
     hints = response.get("priority_hints", {})
     positive_hints = {key for key, value in hints.items() if safe_float(value) > 0.0}
     expected_any: set[str] = scenario["expected_any"]
+    expected_top: set[str] = scenario.get("expected_top", set())
     forbidden_top: set[str] = scenario["forbidden_top"]
-    matched = (top_plan in expected_any) or bool(positive_hints.intersection(expected_any))
+    matched = (top_plan in expected_top) if expected_top else ((top_plan in expected_any) or bool(positive_hints.intersection(expected_any)))
     forbidden = top_plan in forbidden_top
     ok = matched and not forbidden
     status = "PASS" if ok else "FAIL"
