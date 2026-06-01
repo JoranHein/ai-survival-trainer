@@ -13,6 +13,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LOCAL_CONFIG_PATH = REPO_ROOT / "godot_game" / "data" / "ai_config.local.json"
+DEFAULT_REPORT_PATH = REPO_ROOT / "godot_game" / "artifacts" / "reports" / "live_intelligence_probe.md"
 DEFAULT_URL = "http://91.99.219.229:8088/ai/deep-interpretation"
 
 
@@ -129,6 +130,7 @@ def main() -> int:
     parser.add_argument("--url", default="", help="Deep interpretation endpoint. Defaults to env/config/server.")
     parser.add_argument("--timeout", type=float, default=90.0)
     parser.add_argument("--config", default=str(LOCAL_CONFIG_PATH), help="Optional ignored Godot local AI config.")
+    parser.add_argument("--report", default=str(DEFAULT_REPORT_PATH), help="Markdown report path. Does not include secrets.")
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
@@ -142,14 +144,18 @@ def main() -> int:
 
     passed = 0
     failed = 0
+    results: list[dict[str, Any]] = []
     for scenario in SCENARIOS:
-        ok = probe_scenario(url, api_key, scenario, args.timeout)
+        result = probe_scenario(url, api_key, scenario, args.timeout)
+        results.append(result)
+        ok = bool(result.get("ok"))
         if ok:
             passed += 1
         else:
             failed += 1
 
     print(f"summary: passed={passed} failed={failed} total={len(SCENARIOS)}")
+    write_report(Path(args.report), url, results)
     return 1 if failed else 0
 
 
@@ -157,12 +163,12 @@ def load_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
 
 
-def probe_scenario(url: str, api_key: str, scenario: dict[str, Any], timeout: float) -> bool:
+def probe_scenario(url: str, api_key: str, scenario: dict[str, Any], timeout: float) -> dict[str, Any]:
     payload = build_payload(scenario)
     started = time.perf_counter()
     try:
@@ -170,10 +176,28 @@ def probe_scenario(url: str, api_key: str, scenario: dict[str, Any], timeout: fl
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")[:500]
         print(f"FAIL {scenario['id']}: http={exc.code} body={body}")
-        return False
+        return {
+            "id": scenario["id"],
+            "sign": scenario["sign"],
+            "ok": False,
+            "latency": 0.0,
+            "top_plan": "",
+            "interpretation": "",
+            "survival_theory": "",
+            "error": f"http={exc.code} body={body}",
+        }
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         print(f"FAIL {scenario['id']}: request_error={exc}")
-        return False
+        return {
+            "id": scenario["id"],
+            "sign": scenario["sign"],
+            "ok": False,
+            "latency": 0.0,
+            "top_plan": "",
+            "interpretation": "",
+            "survival_theory": "",
+            "error": f"request_error={exc}",
+        }
 
     elapsed = time.perf_counter() - started
     plan = response.get("grounded_plan", [])
@@ -193,7 +217,60 @@ def probe_scenario(url: str, api_key: str, scenario: dict[str, Any], timeout: fl
     print(f"  expected_any={','.join(sorted(expected_any))}")
     if forbidden:
         print(f"  rejected_top_plan={top_plan}")
-    return ok
+    return {
+        "id": scenario["id"],
+        "sign": scenario["sign"],
+        "ok": ok,
+        "latency": elapsed,
+        "top_plan": top_plan,
+        "interpretation": str(response.get("interpretation", "")),
+        "survival_theory": str(response.get("survival_theory", "")),
+        "expected_any": sorted(expected_any),
+        "positive_hints": sorted(positive_hints),
+        "error": "" if ok else ("forbidden top plan" if forbidden else "expected intent not found"),
+    }
+
+
+def write_report(path: Path, url: str, results: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    passed = sum(1 for result in results if result.get("ok"))
+    failed = len(results) - passed
+    latencies = [float(result.get("latency", 0.0)) for result in results if float(result.get("latency", 0.0)) > 0.0]
+    avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+    max_latency = max(latencies) if latencies else 0.0
+    endpoint = url.split("?")[0]
+    lines = [
+        "# Live Ari Intelligence Probe",
+        "",
+        "This report is generated from the ignored local Godot AI config or environment variables. It never stores the API key.",
+        "",
+        f"- Endpoint: `{endpoint}`",
+        f"- Total signs: {len(results)}",
+        f"- Passed: {passed}",
+        f"- Failed: {failed}",
+        f"- Average latency: {avg_latency:.1f}s",
+        f"- Max latency: {max_latency:.1f}s",
+        "",
+        "## Results",
+        "",
+    ]
+    for result in results:
+        status = "PASS" if result.get("ok") else "FAIL"
+        lines.extend(
+            [
+                f"### {result.get('id', '')}: {status}",
+                "",
+                f"- Sign: {result.get('sign', '')}",
+                f"- Latency: {float(result.get('latency', 0.0)):.1f}s",
+                f"- Top plan: `{result.get('top_plan', '') or 'none'}`",
+                f"- Interpretation: {result.get('interpretation', '')}",
+                f"- Survival theory: {result.get('survival_theory', '')}",
+            ]
+        )
+        if result.get("error"):
+            lines.append(f"- Failure: {result.get('error')}")
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def post_json(url: str, api_key: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
