@@ -224,9 +224,9 @@ func get_effects() -> Dictionary:
 		"sword_strength": get_strength("sword"),
 		"attack_damage_bonus": get_value("attack_damage") * 0.045 + get_value("sword") * 0.025,
 		"attack_speed_multiplier": 1.0 + get_value("attack_speed") * 0.035 + get_value("sword") * 0.015,
-		"armor_bonus": get_value("armor") * 0.025,
+		"armor_bonus": get_value("armor") * 0.028,
 		"passive_regen_per_second": get_value("regeneration") * 0.035,
-		"regen_on_kill": get_value("regeneration") * 0.85 + get_value("sword") * 0.28,
+		"regen_on_kill": get_value("regeneration") * 0.85 + get_value("sword") * 0.34,
 		"smithing_speed_multiplier": 1.0 + get_value("smithing") * 0.070,
 		"ore_yield_multiplier": 1.0 + get_value("mining") * 0.045 + get_value("smithing") * 0.045,
 	}

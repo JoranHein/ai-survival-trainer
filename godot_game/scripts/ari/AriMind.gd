@@ -177,6 +177,9 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	mine_ore_preference = clampf(mine_ore_preference + smith_sword_preference * 0.35 + smithing_instinct * 0.12, 0.0, 1.0)
 	armor_preference = clampf(armor_preference + armor_instinct * 0.24 + defense_instinct * 0.08, 0.0, 1.0)
 	regen_preference = clampf(regen_preference + regeneration_instinct * 0.24, 0.0, 1.0)
+	if regen_preference > 0.20 and (smith_sword_preference > 0.25 or train_sword_preference > 0.25):
+		fight_head_on_preference = clampf(fight_head_on_preference + regen_preference * 0.20, 0.0, 1.0)
+		combat_preference = clampf(combat_preference + regen_preference * 0.10, 0.0, 1.0)
 	dawn_survival_preference = clampf(dawn_survival_preference + fear_control_instinct * 0.12 + _build_strength(run_build, "movement") * 0.10, 0.0, 1.0)
 	food_preference = clampf(food_preference + (0.45 if hunger > 58.0 else 0.0) + _build_strength(run_build, "farming") * 0.22, 0.0, 1.0)
 	trap_preference = clampf(trap_preference + trapcraft_instinct * 0.28, 0.0, 1.0)
@@ -428,6 +431,10 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 		maxf(maxf(_hint(priority_hints, "range"), _hint(priority_hints, "train_bow")), _hint(priority_hints, "ranged_attack"))
 	)
 	var fight_head_on_preference := maxf(_hint(priority_hints, "fight_head_on"), _hint(priority_hints, "fight") * 0.65)
+	var sword_kill_preference := maxf(_hint(priority_hints, "train_sword"), _hint(priority_hints, "smith_sword"))
+	var regen_kill_preference := maxf(_hint(priority_hints, "rely_on_regen"), _hint(priority_hints, "regen_on_kill"))
+	if regen_kill_preference > 0.20 and sword_kill_preference > 0.25:
+		fight_head_on_preference = maxf(fight_head_on_preference, 0.46 + regen_kill_preference * 0.22)
 	var dawn_survival_preference := maxf(
 		maxf(_hint(priority_hints, "stall_until_dawn"), _hint(priority_hints, "hide_until_dawn")),
 		maxf(_hint(priority_hints, "survive_until_morning"), _hint(priority_hints, "avoid_killing"))
@@ -460,12 +467,12 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 
 	if ari_hp_ratio <= night_low_hp_ratio:
 		return _job("flee", "HP is low; move away from danger")
+	if fight_head_on_preference > 0.45 and _can_fight_head_on(combat_stats, ari_hp_ratio, enemy_type_counts, active_enemy_count):
+		return _job("fight_head_on", "Sign rejects hiding; fight ground enemies directly")
 	if nearest_enemy_distance <= night_flee_enemy_distance:
 		return _job("flee", "Enemies are too close; move")
 	if wants_dawn_survival and (has_valid_cover or has_valid_aura or has_valid_tower):
 		return _job("hide_until_dawn" if has_valid_cover else "stall_until_dawn", "Survive until morning; do not spend life chasing kills")
-	if fight_head_on_preference > 0.45 and _can_fight_head_on(combat_stats, ari_hp_ratio, enemy_type_counts, active_enemy_count):
-		return _job("fight_head_on", "Sign rejects hiding; fight ground enemies directly")
 	if wants_tower and not has_valid_tower and not has_valid_aura and not has_valid_cover:
 		return _job("flee", "The tower is gone; find another answer")
 	if wants_cover and not has_valid_cover and not has_valid_aura and not has_valid_tower:

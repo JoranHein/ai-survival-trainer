@@ -21,7 +21,7 @@
       "range": 150,
       "range_bonus": 24,
       "damage": 9,
-      "shot_cooldown_seconds": 0.75,
+      "shot_cooldown_seconds": 0.82,
       "stone_cost": 8
     },
     "tar_pit": {

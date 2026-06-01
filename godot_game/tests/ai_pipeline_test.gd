@@ -52,6 +52,7 @@ func _run() -> void:
 	_test_wave_director_escalates_with_flying()
 	_test_day_night_balance_v1_targets()
 	await _test_day_night_balance_v1_multiday_simulation()
+	await _test_combat_survival_balance_v1_scenarios()
 	await _test_survival_strategy_expansion_v1_contract(bridge)
 	_test_ai_tactical_priority_jobs()
 	_test_memory_records_events()
@@ -721,6 +722,19 @@ func _test_ai_tactical_priority_jobs() -> void:
 	_assert(close_enemy_decision.get("job", "") == "flee", "Ari should flee when enemies are too close for the tactic")
 	_assert(str(close_enemy_decision.get("reason", "")).to_lower().contains("close"), "flee reason should explain close danger")
 
+	var close_fight_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 1,
+		"nearest_enemy_distance": 32.0,
+		"ari_hp_ratio": 0.9,
+		"combat_stats": {"combat_level": 1.0, "sword_skill": 1.2, "attack_damage": 18.0, "armor": 0.18},
+		"priority_hints": {
+			"fight_head_on": 0.95,
+		},
+	}))
+	_assert(close_fight_decision.get("job", "") == "fight_head_on", "strong melee intent should attack inside normal flee distance when Ari is ready")
+
 	var broken_cover_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
 		"is_night": true,
 		"phase": "night",
@@ -888,6 +902,16 @@ func _test_survival_strategy_expansion_v1_contract(bridge: AIBridge) -> void:
 		"priority_hints": {"fight_head_on": 0.95},
 	}))
 	_assert(night_fight_decision.get("job", "") == "fight_head_on", "strong melee intent should allow head-on fighting at night")
+	var night_lifesteal_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 1,
+		"nearest_enemy_distance": 36.0,
+		"ari_hp_ratio": 0.86,
+		"combat_stats": {"combat_level": 0.6, "sword_skill": 0.8, "attack_damage": 20.0, "armor": 0.12},
+		"priority_hints": {"smith_sword": 0.85, "train_sword": 0.55, "regen_on_kill": 0.9},
+	}))
+	_assert(night_lifesteal_decision.get("job", "") == "fight_head_on", "sword plus life-on-kill intent should become visible melee when Ari is ready")
 	var stall_decision: Dictionary = ari_mind.call("choose_night_tactic", _base_mind_context({
 		"is_night": true,
 		"phase": "night",
@@ -1309,6 +1333,142 @@ func _test_day_night_balance_v1_multiday_simulation() -> void:
 		DirAccess.remove_absolute(absolute_save_path)
 
 
+func _test_combat_survival_balance_v1_scenarios() -> void:
+	var scenarios := [
+		{
+			"id": "survive_until_morning",
+			"seed": 191,
+			"preset_key": 11,
+			"sign": "just survive until morning",
+		},
+		{
+			"id": "sword_killer",
+			"seed": 271,
+			"preset_key": 9,
+			"sign": "do not hide, focus on killing enemies",
+		},
+		{
+			"id": "lifesteal_smith",
+			"seed": 353,
+			"preset_key": 12,
+			"sign": "make a sword that gives you life when they die",
+		},
+		{
+			"id": "heavy_armor_thorns",
+			"seed": 419,
+			"preset_key": 10,
+			"sign": "heavy armor and thorns",
+		},
+		{
+			"id": "tower_arrows",
+			"seed": 557,
+			"preset_key": 5,
+			"sign": "build a mountain where arrows rain",
+		},
+		{
+			"id": "aura_circle",
+			"seed": 631,
+			"preset_key": 2,
+			"sign": "the circle should eat the dead",
+		},
+	]
+	var results := {}
+	for scenario in scenarios:
+		var stats: Dictionary = await _run_combat_survival_scenario(
+			str(scenario.get("id", "")),
+			int(scenario.get("seed", 1)),
+			int(scenario.get("preset_key", 0)),
+			str(scenario.get("sign", ""))
+		)
+		results[str(scenario.get("id", ""))] = stats
+		_print_combat_survival_stats(stats)
+
+	var survival: Dictionary = results.get("survive_until_morning", {})
+	_assert(int(survival.get("day", 1)) >= 3, "survival-until-morning sign should last beyond the first night")
+	_assert(int(survival.get("dawn_vanished_total", 0)) > 0, "survival-until-morning sign should benefit from dawn clearing enemies")
+
+	var killer: Dictionary = results.get("sword_killer", {})
+	_assert(int(killer.get("day", 1)) >= 3, "direct-killing build should remain viable past the first night")
+	_assert(int(killer.get("melee_hits", 0)) > 0, "direct-killing build should visibly engage enemies in melee")
+
+	var lifesteal: Dictionary = results.get("lifesteal_smith", {})
+	_assert(int(lifesteal.get("ore_mined_events", 0)) > 0, "life-from-sword sign should pursue ore")
+	_assert(int(lifesteal.get("max_sword_tier", 0)) >= 1, "life-from-sword sign should reach at least a crude sword")
+	_assert(int(lifesteal.get("melee_hits", 0)) > 0, "life-from-sword sign should eventually risk melee to use the blade")
+	_assert(float(lifesteal.get("max_regen_healed", 0.0)) <= 6.0, "regen-on-kill should reward aggression without erasing damage")
+
+	var armor: Dictionary = results.get("heavy_armor_thorns", {})
+	_assert(float(armor.get("final_armor", 0.0)) >= 0.10, "heavy armor build should expose meaningful armor")
+	_assert(int(armor.get("max_thorn_totem_count", 0)) >= 1 or int(armor.get("ari_damaged_events", 0)) <= 6, "armor/thorns build should either prepare thorns or visibly reduce punishment")
+
+	var tower: Dictionary = results.get("tower_arrows", {})
+	_assert(int(tower.get("max_bow_tower_count", 0)) >= 1, "tower sign should build a tower")
+	_assert(int(tower.get("ranged_hits", 0)) > 0 or int(tower.get("day", 1)) >= 3, "tower sign should either fire shots or buy survival time")
+
+	var aura: Dictionary = results.get("aura_circle", {})
+	_assert(int(aura.get("max_aura_orb_count", 0)) >= 1, "aura sign should place an aura orb")
+	_assert(int(aura.get("aura_damage_events", 0)) > 0 or int(aura.get("day", 1)) >= 3, "aura sign should either damage enemies or buy survival time")
+
+
+func _run_combat_survival_scenario(id: String, scenario_seed: int, preset_key: int, sign: String) -> Dictionary:
+	seed(scenario_seed)
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should load for combat/survival scenario %s" % id)
+	if world_scene == null:
+		return {}
+	var test_save_path := "user://combat_survival_balance_%s.json" % id
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	_isolate_balance_progression(world, test_save_path)
+	world.call("start_run")
+	await process_frame
+	var bridge: AIBridge = world.get("ai_bridge")
+	if bridge != null:
+		bridge.force_provider_mode("local_stub")
+	world.call("select_run_build_preset", preset_key, false)
+	world.call("commit_sign", sign)
+	var stats: Dictionary = await _simulate_balance_seconds(world, 312.0, 0.30)
+	stats["scenario"] = id
+	stats["sign"] = sign
+	stats["preset_key"] = preset_key
+	stats["current_job"] = str(world.get("current_job"))
+	stats["latest_thought"] = str(world.get("latest_thought"))
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
+	var absolute_save_path := ProjectSettings.globalize_path(test_save_path)
+	if FileAccess.file_exists(test_save_path):
+		DirAccess.remove_absolute(absolute_save_path)
+	return stats
+
+
+func _print_combat_survival_stats(stats: Dictionary) -> void:
+	print("Combat/survival sim %s: day=%d phase=%s alive=%s hp=%.1f hunger=%.1f food=%d stone=%d ore=%d sword=%d armor=%.2f kills=%d melee=%d ranged=%d aura=%d dawn_vanished=%d smithed=%d walls=%d aura_orbs=%d towers=%d thorns=%d" % [
+		str(stats.get("scenario", "")),
+		int(stats.get("day", 1)),
+		str(stats.get("phase", "")),
+		str(stats.get("alive", false)),
+		float(stats.get("hp", 0.0)),
+		float(stats.get("hunger", 0.0)),
+		int(stats.get("food", 0)),
+		int(stats.get("stone", 0)),
+		int(stats.get("ore", 0)),
+		int(stats.get("max_sword_tier", 0)),
+		float(stats.get("final_armor", 0.0)),
+		int(stats.get("enemy_kills", 0)),
+		int(stats.get("melee_hits", 0)),
+		int(stats.get("ranged_hits", 0)),
+		int(stats.get("aura_damage_events", 0)),
+		int(stats.get("dawn_vanished_total", 0)),
+		int(stats.get("sword_smithed_events", 0)),
+		int(stats.get("max_wall_count", 0)),
+		int(stats.get("max_aura_orb_count", 0)),
+		int(stats.get("max_bow_tower_count", 0)),
+		int(stats.get("max_thorn_totem_count", 0)),
+	])
+
+
 func _base_mind_context(overrides: Dictionary) -> Dictionary:
 	var context := {
 		"is_night": false,
@@ -1385,11 +1545,17 @@ func _simulate_balance_seconds(world: World, seconds: float, step_seconds: float
 	var max_wall_count := 0
 	var max_aura_orb_count := 0
 	var max_bow_tower_count := 0
+	var max_thorn_totem_count := 0
+	var max_storm_rod_count := 0
+	var max_sword_tier := 0
+	var max_ore := 0
+	var min_hp := INF
 	var flying_seen := false
 	while elapsed < seconds:
 		var ari = world.get("ari")
 		if ari == null or not bool(ari.call("is_alive")):
 			break
+		min_hp = minf(min_hp, float(ari.get("hp")))
 		var step := minf(step_seconds, seconds - elapsed)
 		world.call("_process", step)
 		for structure in world.call("get_structures"):
@@ -1404,6 +1570,13 @@ func _simulate_balance_seconds(world: World, seconds: float, step_seconds: float
 		max_wall_count = maxi(max_wall_count, int(world.call("get_wall_count")))
 		max_aura_orb_count = maxi(max_aura_orb_count, int(world.call("get_aura_orb_count")))
 		max_bow_tower_count = maxi(max_bow_tower_count, int(world.call("get_bow_tower_count")))
+		max_thorn_totem_count = maxi(max_thorn_totem_count, int(world.call("get_thorn_totem_count")))
+		max_storm_rod_count = maxi(max_storm_rod_count, int(world.call("get_storm_rod_count")))
+		if world.has_method("_current_sword_tier"):
+			max_sword_tier = maxi(max_sword_tier, int(world.call("_current_sword_tier")))
+		var resource_system = world.get("resource_system")
+		if resource_system != null and resource_system.has_method("get_ore"):
+			max_ore = maxi(max_ore, int(resource_system.call("get_ore")))
 		var counts: Dictionary = world.call("get_enemy_type_counts")
 		flying_seen = flying_seen or int(counts.get("flying", 0)) > 0
 		elapsed += step
@@ -1414,14 +1587,18 @@ func _simulate_balance_seconds(world: World, seconds: float, step_seconds: float
 	var needs: Dictionary = ari.call("get_needs") if ari != null else {}
 	var resource_system = world.get("resource_system")
 	var day_night = world.get("day_night")
+	var ari_memory = world.get("ari_memory")
+	var event_summary := _summarize_balance_events(ari_memory.call("get_recent_events", 300) if ari_memory != null else [])
 	return {
 		"alive": ari != null and bool(ari.call("is_alive")),
 		"hp": float(ari.get("hp")) if ari != null else 0.0,
+		"min_hp": min_hp if min_hp < INF else 0.0,
 		"hunger": float(needs.get("hunger", 100.0)),
 		"day": int(day_night.get("day")) if day_night != null else 1,
 		"phase": str(day_night.get("phase")) if day_night != null else "",
 		"food": int(resource_system.call("get_food")) if resource_system != null else 0,
 		"stone": int(resource_system.call("get_stone")) if resource_system != null else 0,
+		"ore": int(resource_system.call("get_ore")) if resource_system != null and resource_system.has_method("get_ore") else 0,
 		"structures": int(world.call("get_structures").size()),
 		"wall_count": int(world.call("get_wall_count")),
 		"aura_orb_count": int(world.call("get_aura_orb_count")),
@@ -1429,9 +1606,81 @@ func _simulate_balance_seconds(world: World, seconds: float, step_seconds: float
 		"max_wall_count": max_wall_count,
 		"max_aura_orb_count": max_aura_orb_count,
 		"max_bow_tower_count": max_bow_tower_count,
+		"max_thorn_totem_count": max_thorn_totem_count,
+		"max_storm_rod_count": max_storm_rod_count,
+		"max_sword_tier": max_sword_tier,
+		"max_ore": max_ore,
+		"final_armor": float(ari.get("armor")) if ari != null else 0.0,
 		"enemies": int(world.call("get_enemy_count")),
 		"flying_seen": flying_seen,
 		"max_night_enemies": max_night_enemies,
+		"event_counts": event_summary.get("event_counts", {}),
+		"enemy_kills": int(event_summary.get("enemy_kills", 0)),
+		"melee_hits": int(event_summary.get("melee_hits", 0)),
+		"ranged_hits": int(event_summary.get("ranged_hits", 0)),
+		"aura_damage_events": int(event_summary.get("aura_damage_events", 0)),
+		"dawn_clear_events": int(event_summary.get("dawn_clear_events", 0)),
+		"dawn_vanished_total": int(event_summary.get("dawn_vanished_total", 0)),
+		"sword_smithed_events": int(event_summary.get("sword_smithed_events", 0)),
+		"ore_mined_events": int(event_summary.get("ore_mined_events", 0)),
+		"ari_damaged_events": int(event_summary.get("ari_damaged_events", 0)),
+		"max_regen_healed": float(event_summary.get("max_regen_healed", 0.0)),
+		"total_regen_healed": float(event_summary.get("total_regen_healed", 0.0)),
+	}
+
+
+func _summarize_balance_events(events: Array) -> Dictionary:
+	var event_counts := {}
+	var enemy_kills := 0
+	var melee_hits := 0
+	var ranged_hits := 0
+	var aura_damage_events := 0
+	var dawn_clear_events := 0
+	var dawn_vanished_total := 0
+	var sword_smithed_events := 0
+	var ore_mined_events := 0
+	var ari_damaged_events := 0
+	var max_regen_healed := 0.0
+	var total_regen_healed := 0.0
+	for event in events:
+		if typeof(event) != TYPE_DICTIONARY:
+			continue
+		var event_type := str(event.get("type", ""))
+		event_counts[event_type] = int(event_counts.get(event_type, 0)) + 1
+		match event_type:
+			"enemy_killed":
+				enemy_kills += 1
+				var healed := maxf(float(event.get("regen_healed", 0.0)), 0.0)
+				total_regen_healed += healed
+				max_regen_healed = maxf(max_regen_healed, healed)
+			"ari_melee_hit":
+				melee_hits += 1
+			"ari_ranged_hit":
+				ranged_hits += 1
+			"aura_damage_success":
+				aura_damage_events += 1
+			"dawn_enemies_vanished":
+				dawn_clear_events += 1
+				dawn_vanished_total += maxi(int(event.get("count", 0)), 0)
+			"sword_smithed":
+				sword_smithed_events += 1
+			"ore_mined":
+				ore_mined_events += 1
+			"ari_damaged":
+				ari_damaged_events += 1
+	return {
+		"event_counts": event_counts,
+		"enemy_kills": enemy_kills,
+		"melee_hits": melee_hits,
+		"ranged_hits": ranged_hits,
+		"aura_damage_events": aura_damage_events,
+		"dawn_clear_events": dawn_clear_events,
+		"dawn_vanished_total": dawn_vanished_total,
+		"sword_smithed_events": sword_smithed_events,
+		"ore_mined_events": ore_mined_events,
+		"ari_damaged_events": ari_damaged_events,
+		"max_regen_healed": max_regen_healed,
+		"total_regen_healed": total_regen_healed,
 	}
 
 
