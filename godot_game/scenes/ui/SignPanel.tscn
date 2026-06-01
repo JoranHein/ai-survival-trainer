@@ -132,6 +132,13 @@ theme_override_colors/font_color = Color(0.72, 0.88, 0.74, 1)
 theme_override_font_sizes/font_size = 12
 text = "SIGNAL 0%"
 
+[node name="AiStatusLabel" type="Label" parent="DisplayPanel/DisplayVBox/SignalRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.86, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "AI disabled"
+
 [node name="FooterSpacer" type="Control" parent="DisplayPanel/DisplayVBox/SignalRow"]
 layout_mode = 2
 size_flags_horizontal = 3

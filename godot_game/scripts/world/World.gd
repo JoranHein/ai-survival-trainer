@@ -97,6 +97,7 @@ var _ai_sign_request_id := 0
 var _ai_waiting_active := false
 var _ai_waiting_elapsed := 0.0
 var _ai_waiting_last_second := -1
+var _ai_waiting_still_thought_shown := false
 var _ari_ranged_cooldown := 0.0
 var _ari_ranged_flash_time := 0.0
 var _ari_ranged_flash_from := Vector2.ZERO
@@ -2746,7 +2747,7 @@ func _on_ai_deep_interpretation_response(request_id: int, result: Dictionary) ->
 	_finish_ai_waiting()
 	if not bool(result.get("ok", false)):
 		ai_status = "AI: failed/fallback"
-		_show_ari_thought("The deeper answer did not arrive. I will trust the first reading.", true)
+		_show_ari_thought("I cannot hear more from the sign. I will use what I understood.", true)
 		_emit_state()
 		return
 
@@ -2757,10 +2758,12 @@ func _on_ai_deep_interpretation_response(request_id: int, result: Dictionary) ->
 	sign_resonance = clampf(float(result.get("resonance", sign_resonance)), 0.0, 1.0)
 	ai_survival_theory = str(result.get("survival_theory", "")).strip_edges()
 	ai_emotion = str(result.get("emotion", "")).strip_edges()
-	ai_status = "AI: cached" if bool(result.get("cached", false)) or str(result.get("source", "")) == "cache" else "AI: active"
-	var thought := str(result.get("thought", "")).strip_edges()
-	if thought != "":
-		_show_ari_thought(thought, true)
+	var used_cache := bool(result.get("cached", false)) or str(result.get("source", "")) == "cache"
+	ai_status = "AI: cached" if used_cache else "AI: active"
+	var thought := "I remember this sign." if used_cache else str(result.get("thought", "")).strip_edges()
+	if thought == "":
+		thought = "Now I see it."
+	_show_ari_thought(thought, true)
 	_emit_state()
 
 
@@ -2774,8 +2777,9 @@ func _begin_ai_waiting() -> void:
 	_ai_waiting_active = true
 	_ai_waiting_elapsed = 0.0
 	_ai_waiting_last_second = -1
+	_ai_waiting_still_thought_shown = false
 	_update_ai_waiting_status()
-	_show_ari_thought("The sign is deeper than it looks. I need a moment.", true)
+	_show_ari_thought("I understand part of it. I need to turn the rest over.", true)
 
 
 func _advance_ai_waiting(delta: float) -> void:
@@ -2786,12 +2790,16 @@ func _advance_ai_waiting(delta: float) -> void:
 	if current_second == _ai_waiting_last_second:
 		return
 	_update_ai_waiting_status()
+	if _ai_waiting_elapsed >= 10.0 and not _ai_waiting_still_thought_shown:
+		_ai_waiting_still_thought_shown = true
+		_show_ari_thought("The sign is still unfolding.", true)
 	if is_inside_tree():
 		_emit_state()
 
 
 func _finish_ai_waiting() -> void:
 	_ai_waiting_active = false
+	_ai_waiting_still_thought_shown = false
 
 
 func _update_ai_waiting_status() -> void:
@@ -2800,10 +2808,7 @@ func _update_ai_waiting_status() -> void:
 	var dots := ""
 	for _i in range(seconds % 4):
 		dots += "."
-	if seconds >= 15:
-		ai_status = "AI: still thinking %ds%s" % [seconds, dots]
-	else:
-		ai_status = "AI: thinking %ds%s" % [seconds, dots]
+	ai_status = "AI: thinking %ds%s" % [seconds, dots]
 
 
 func _build_ai_deep_interpretation_payload() -> Dictionary:

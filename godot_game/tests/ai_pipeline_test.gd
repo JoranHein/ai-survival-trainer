@@ -16,6 +16,7 @@ const SignMindScript = preload("res://scripts/ari/SignMind.gd")
 const EnemyControllerScript = preload("res://scripts/enemies/EnemyController.gd")
 const WaveDirectorScript = preload("res://scripts/world/WaveDirector.gd")
 const WorldScript = preload("res://scripts/world/World.gd")
+const SignPanelScene = preload("res://scenes/ui/SignPanel.tscn")
 
 var failures: Array[String] = []
 
@@ -33,6 +34,7 @@ func _run() -> void:
 	_test_deep_interpretation_contract(bridge)
 	_test_ai_latency_cache_v1_contract(bridge)
 	await _test_world_ai_latency_commit_contract()
+	await _test_sign_panel_ai_status_line()
 	_test_local_combat_signs()
 	_test_local_tower_range_signs()
 	_test_local_flying_storm_signs()
@@ -282,9 +284,13 @@ func _test_ai_latency_cache_v1_contract(bridge: AIBridge) -> void:
 		return
 	world.call("_begin_ai_waiting")
 	_assert(str(world.get("ai_status")).begins_with("AI: thinking"), "world should expose an AI thinking status while remote interpretation is pending")
-	_assert(str(world.get("latest_thought")).contains("deeper than it looks"), "world should show a diegetic waiting thought")
-	world.call("_advance_ai_waiting", 18.0)
-	_assert(str(world.get("ai_status")).contains("still thinking"), "world should expose still-thinking status for slow remote interpretation")
+	_assert(str(world.get("latest_thought")) == "I understand part of it. I need to turn the rest over.", "world should show the requested initial waiting thought")
+	world.call("_advance_ai_waiting", 10.1)
+	_assert(str(world.get("latest_thought")) == "The sign is still unfolding.", "world should show the requested long-pending thought after ten seconds")
+	world.set("latest_thought", "sentinel after long pending")
+	world.call("_advance_ai_waiting", 10.0)
+	_assert(str(world.get("latest_thought")) == "sentinel after long pending", "world should not repeat the long-pending thought after it fires once")
+	_assert(str(world.get("ai_status")).contains("thinking"), "world should keep exposing thinking status for slow remote interpretation")
 	world.call("_finish_ai_waiting")
 	_assert(not bool(world.get("_ai_waiting_active")), "world should stop pending state when remote interpretation resolves")
 	world.free()
@@ -335,6 +341,47 @@ func _test_world_ai_latency_commit_contract() -> void:
 	_assert(str(world.get("ai_status")) == "AI: active", "valid remote response should leave AI active")
 	_assert(str(world.get("latest_thought")).contains("buys me time"), "valid remote response should show Ari's AI thought")
 
+	world.call("_begin_ai_waiting")
+	world.call("_on_ai_deep_interpretation_response", request_id, {
+		"ok": true,
+		"source": "remote_server",
+		"interpretation": "Remote sees the wall again.",
+		"survival_theory": "remote_cover",
+		"grounded_plan": [{
+			"affordance_id": "use_existing_wall",
+			"priority": 0.7,
+			"reason": "The sign says to stand behind the existing wall.",
+		}],
+		"priority_hints": {
+			"use_existing_wall": 0.7,
+		},
+		"sign_strength": 0.7,
+		"resonance": 0.7,
+	})
+	_assert(str(world.get("latest_thought")) == "Now I see it.", "valid remote response without a thought should show the fallback understood moment")
+
+	world.call("_begin_ai_waiting")
+	world.call("_on_ai_deep_interpretation_response", request_id, {
+		"ok": true,
+		"cached": true,
+		"source": "cache",
+		"interpretation": "Cached remote reads the wall as cover.",
+		"thought": "Cached thought should not override the remembered sign line.",
+		"survival_theory": "cached_cover",
+		"grounded_plan": [{
+			"affordance_id": "use_existing_wall",
+			"priority": 0.8,
+			"reason": "The cached sign still points to existing cover.",
+		}],
+		"priority_hints": {
+			"use_existing_wall": 0.8,
+		},
+		"sign_strength": 0.8,
+		"resonance": 0.8,
+	})
+	_assert(str(world.get("ai_status")) == "AI: cached", "cached remote response should expose cached status")
+	_assert(str(world.get("latest_thought")) == "I remember this sign.", "cached remote response should show the requested memory thought")
+
 	var remote_interpretation := str(world.get("sign_interpretation"))
 	world.call("_begin_ai_waiting")
 	world.call("_on_ai_deep_interpretation_response", request_id, {
@@ -343,9 +390,28 @@ func _test_world_ai_latency_commit_contract() -> void:
 	})
 	_assert(str(world.get("sign_interpretation")) == remote_interpretation, "failed remote response should not erase the current interpretation")
 	_assert(str(world.get("ai_status")) == "AI: failed/fallback", "failed remote response should expose fallback status")
+	_assert(str(world.get("latest_thought")) == "I cannot hear more from the sign. I will use what I understood.", "failed remote response should show the requested fallback thought")
 
 	root.remove_child(world)
 	world.queue_free()
+	await process_frame
+
+
+func _test_sign_panel_ai_status_line() -> void:
+	var panel = SignPanelScene.instantiate()
+	root.add_child(panel)
+	await process_frame
+	panel.call("update_state", {
+		"ai_status": "AI: thinking 12s...",
+		"sign_text": "stand behind the wall",
+		"sign_interpretation": "Ari reads the wall as cover.",
+	})
+	var status_label = panel.get_node_or_null("DisplayPanel/DisplayVBox/SignalRow/AiStatusLabel")
+	_assert(status_label != null, "SignPanel should expose a compact AI status line in the signal row")
+	if status_label != null:
+		_assert(str(status_label.get("text")) == "AI: thinking 12s...", "SignPanel should show the current AI status")
+	root.remove_child(panel)
+	panel.queue_free()
 	await process_frame
 
 

@@ -14,6 +14,7 @@ signal sign_cancelled
 @onready var reading_label: Label = %ReadingLabel
 @onready var theory_label: Label = %TheoryLabel
 @onready var plan_label: Label = %PlanLabel
+@onready var ai_status_label: Label = %AiStatusLabel
 @onready var signal_label: Label = %SignalLabel
 @onready var resonance_label: Label = %ResonanceLabel
 
@@ -34,6 +35,7 @@ func update_state(state: Dictionary) -> void:
 	var interpretation := str(state.get("sign_interpretation", "No sign yet."))
 	var survival_theory := str(state.get("ai_survival_theory", "")).strip_edges()
 	var top_plan := str(state.get("ai_top_grounded_plan", "")).strip_edges()
+	var ai_status := str(state.get("ai_status", "AI disabled")).strip_edges()
 	var personality_summary := str(state.get("personality_summary", "Ari: balanced"))
 	var sign_strength := clampf(float(state.get("sign_strength", 0.0)), 0.0, 1.0)
 	var resonance := clampf(float(state.get("sign_resonance", 0.0)), 0.0, 1.0)
@@ -44,6 +46,8 @@ func update_state(state: Dictionary) -> void:
 	reading_label.text = "Reads: %s" % _limit_text(interpretation, 91)
 	theory_label.text = "Theory: %s" % _limit_text(survival_theory if survival_theory != "" else "local reading", 89)
 	plan_label.text = "Plan: %s" % _limit_text(top_plan if top_plan != "" else "watch and survive", 91)
+	ai_status_label.text = ai_status
+	ai_status_label.visible = ai_status != ""
 	signal_label.text = "SIGNAL %d%%" % int(round(sign_strength * 100.0))
 	resonance_label.text = "RESONANCE %d%%" % int(round(resonance * 100.0))
 
