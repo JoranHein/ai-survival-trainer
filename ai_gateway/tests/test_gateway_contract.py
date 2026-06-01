@@ -289,9 +289,18 @@ def test_deep_user_prompt_lists_current_tools_and_examples():
 def test_prompt_examples_prefer_semantic_affordance_mapping():
     prompt = deep_user_prompt(_deep_request("stand behind the wall"))
 
-    assert '"use_existing_wall":0.9' in prompt
-    assert '"wait_behind_wall":0.8' in prompt
-    assert '"build_wall":0.1' in prompt
-    assert "spider/web means trap, patience, luring, and making the room dangerous" in prompt
-    assert '"lure_to_aura":0.9' in prompt
-    assert "The wall does not reach the sky" in prompt
+    assert "stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall" in prompt
+    assert "the circle should eat the dead => lure_to_aura/place_aura_orb" in prompt
+    assert "the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover" in prompt
+    assert "my stomach is a second wall => farm_food/eat_food/eat/rest, not wall" in prompt
+    assert "Semantic cues for this sign: existing wall cover" in prompt
+    assert "build_wall=0" in prompt
+
+
+def test_deep_user_prompt_stays_compact_for_latency():
+    prompt = deep_user_prompt(_deep_request("the wings do not fear stone"))
+
+    assert len(prompt) < 3200
+    assert "current_affordances available:" in prompt
+    assert "Compatibility priority_hints may use these executable affordance ids" not in prompt
+    assert "sky threat; wall/cover fails" in prompt

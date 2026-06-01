@@ -23,6 +23,10 @@ class Settings:
     fast_model: str = os.getenv("FAST_MODEL", os.getenv("MODEL_NAME", "qwen3:1.7b"))
     deep_model: str = os.getenv("DEEP_MODEL", os.getenv("MODEL_NAME", "qwen3:1.7b"))
     request_timeout_seconds: float = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "60"))
+    model_temperature: float = float(os.getenv("MODEL_TEMPERATURE", "0.0"))
+    deep_max_tokens: int = int(os.getenv("DEEP_MAX_TOKENS", "300"))
+    fast_max_tokens: int = int(os.getenv("FAST_MAX_TOKENS", "80"))
+    ollama_json_format: bool = os.getenv("OLLAMA_JSON_FORMAT", "true").lower() == "true"
     debug_log_signs: bool = os.getenv("DEBUG_LOG_SIGNS", "false").lower() == "true"
 
 
@@ -38,7 +42,7 @@ async def call_deep_model(request: DeepInterpretationRequest, settings: Settings
             model=settings.deep_model,
             system_prompt=DEEP_SYSTEM_PROMPT,
             user_prompt=deep_user_prompt(request),
-            max_tokens=360,
+            max_tokens=settings.deep_max_tokens,
         )
         logger.info("deep_interpretation model=success latency_ms=%d", int((time.perf_counter() - start) * 1000))
         return raw
@@ -54,7 +58,7 @@ async def call_fast_model(request: FastThoughtRequest, settings: Settings) -> di
         model=settings.fast_model,
         system_prompt=FAST_SYSTEM_PROMPT,
         user_prompt=fast_user_prompt(request),
-        max_tokens=96,
+        max_tokens=settings.fast_max_tokens,
     )
     logger.info("fast_thought model=success latency_ms=%d", int((time.perf_counter() - start) * 1000))
     return raw
@@ -79,8 +83,10 @@ async def _ollama_chat(settings: Settings, model: str, system_prompt: str, user_
         ],
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.2, "num_predict": max_tokens},
+        "options": {"temperature": settings.model_temperature, "num_predict": max_tokens},
     }
+    if settings.ollama_json_format:
+        payload["format"] = "json"
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
         response = await client.post(f"{settings.model_base_url}/api/chat", json=payload)
         response.raise_for_status()
@@ -99,7 +105,7 @@ async def _openai_chat(settings: Settings, model: str, system_prompt: str, user_
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.2,
+        "temperature": settings.model_temperature,
         "max_tokens": max_tokens,
     }
     async with httpx.AsyncClient(timeout=settings.request_timeout_seconds) as client:
