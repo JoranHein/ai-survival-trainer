@@ -24,6 +24,7 @@ func _validate_sleep_plan(plan: Dictionary) -> Dictionary:
 		"dominant_memory": _limit_text(str(plan.get("dominant_memory", "")), 500),
 		"tomorrow_focus": _string_array(plan.get("tomorrow_focus", ["prepare"]), 8, 50),
 		"priority_bias": _priority_bias(plan.get("priority_bias", {})),
+		"doctrines": _doctrines(plan.get("doctrines", [])),
 		"wake_thought": _limit_text(str(plan.get("wake_thought", "")), 300),
 	}
 
@@ -42,6 +43,11 @@ func _get_bridge() -> AIBridge:
 		return ai_bridge
 	ai_bridge = AIBridge.new()
 	return ai_bridge
+
+
+func _doctrines(value) -> Array:
+	var doctrine_validator := AriDoctrine.new()
+	return doctrine_validator.add_doctrines(value)
 
 
 func _string_array(value, max_count: int, max_length: int) -> Array[String]:

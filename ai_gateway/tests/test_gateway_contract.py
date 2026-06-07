@@ -278,6 +278,28 @@ def test_deep_interpretation_accepts_modern_godot_payload_with_extra_request_fie
     }
 
 
+def test_deep_interpretation_deterministic_mode_skips_model(monkeypatch):
+    import app.main as gateway_main
+    from app.model_client import Settings
+
+    payload = _modern_godot_payload()
+
+    async def fake_call_deep_model(_request, _settings):
+        raise AssertionError("deterministic deep mode must not call the model")
+
+    monkeypatch.setattr(gateway_main, "call_deep_model", fake_call_deep_model)
+    gateway_main.app.dependency_overrides[gateway_main.get_settings] = lambda: Settings(deep_mode="deterministic")
+    try:
+        response = TestClient(gateway_main.app).post("/ai/deep-interpretation", json=payload)
+    finally:
+        gateway_main.app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["interpretation"] == payload["local_fallback"]["interpretation"]
+    assert data["survival_theory"] == "local_fallback"
+
+
 def test_deep_request_accepts_rulebook_perception_and_prompt_uses_strategy_context():
     payload = _modern_godot_payload()
     payload["sign_text"] = "attack them around the corner with a bow"
@@ -358,6 +380,13 @@ INTELLIGENCE_CONTRACT_SCENARIOS = [
         "facts": ["Existing wall cover and bow tower range can combine."],
         "expected_plan": ["use_cover", "ranged_attack", "use_tower"],
         "reject": ["build_wall"],
+    },
+    {
+        "sign": "use bow",
+        "world": {"wall_count": 1, "bow_tower_count": 1, "enemy_count": 1, "enemy_type_counts": {"zombie": 1}},
+        "facts": ["A bow tower can support ranged attacks.", "A ground enemy is approaching."],
+        "expected_plan": ["use_tower", "ranged_attack", "train_bow", "build_tower"],
+        "reject": ["train_combat", "fight_head_on"],
     },
 ]
 
@@ -455,6 +484,24 @@ def test_prompt_direct_combat_rejects_default_tower_top_plan():
     assert "theory should be combat prep/sword/direct fighting" in prompt
     assert "Do not use tower/range as top plan for generic killing" in prompt
     assert "explicit no-hide/direct killing" in prompt
+
+
+def test_prompt_use_bow_has_ranged_semantic_cue():
+    payload = _intelligence_payload(
+        {
+            "sign": "use bow",
+            "world": {"wall_count": 1, "bow_tower_count": 1, "enemy_count": 1, "enemy_type_counts": {"zombie": 1}},
+            "facts": ["A bow tower can support ranged attacks."],
+            "expected_plan": ["use_tower", "ranged_attack"],
+            "reject": ["train_combat"],
+        }
+    )
+
+    prompt = deep_user_prompt(DeepInterpretationRequest(**payload))
+
+    assert "use bow" in prompt
+    assert "bow/ranged intent" in prompt
+    assert "use_tower/ranged_attack/train_bow/build_tower" in prompt
 
 
 def _deep_request(sign_text: str) -> "DeepInterpretationRequest":
@@ -828,3 +875,4 @@ def test_deep_user_prompt_stays_compact_for_latency():
     assert "current_affordances available:" in prompt
     assert "Compatibility priority_hints may use these executable affordance ids" not in prompt
     assert "sky threat; wall/cover fails" in prompt
+    assert "after storm exists, add tower/ranged support" in prompt

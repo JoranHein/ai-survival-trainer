@@ -343,6 +343,13 @@ func stop_daytime_job(reason := "Waiting") -> void:
 	queue_redraw()
 
 
+func mark_eating_food(reason := "Eating food") -> void:
+	_set_job("eat_food", reason)
+	_stop_mining()
+	current_action = "eating food"
+	queue_redraw()
+
+
 func get_current_action() -> String:
 	return current_action
 
@@ -360,6 +367,8 @@ func get_action_cue() -> Dictionary:
 		return _make_action_cue("sword", phase, Color(1.0, 0.48, 0.24, 1.0))
 	if action.find("farm") >= 0:
 		return _make_action_cue("farm", phase, Color(0.48, 0.88, 0.36, 1.0))
+	if action.find("eat") >= 0 or action.find("food") >= 0:
+		return _make_action_cue("food", phase, Color(0.48, 0.88, 0.36, 1.0))
 	if action.find("bed") >= 0 or action.find("rest") >= 0:
 		return _make_action_cue("rest", phase, Color(0.95, 0.82, 0.42, 1.0))
 	if action.find("library") >= 0 or action.find("reflect") >= 0:

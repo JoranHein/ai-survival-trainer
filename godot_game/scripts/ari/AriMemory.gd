@@ -33,16 +33,28 @@ func record_event(event_type: String, data: Dictionary = {}) -> void:
 	if not event.has("sequence"):
 		event["sequence"] = _next_event_sequence
 		_next_event_sequence += 1
+	if not event.has("event_id"):
+		event["event_id"] = "event_%04d" % int(event.get("sequence", _next_event_sequence))
 	if not event.has("timestamp"):
 		event["timestamp"] = Time.get_ticks_msec() / 1000.0
+	if not event.has("source"):
+		event["source"] = "godot"
+	if not event.has("origin"):
+		event["origin"] = "world_event"
 	events.append(event)
 	_trim_array(events, MAX_EVENTS)
 
 
 func record_snapshot(snapshot: Dictionary) -> void:
 	var safe_snapshot := snapshot.duplicate(true)
+	if not safe_snapshot.has("snapshot_id") or str(safe_snapshot.get("snapshot_id", "")).strip_edges() == "":
+		safe_snapshot["snapshot_id"] = "snap_%04d" % (snapshots.size() + 1)
 	if not safe_snapshot.has("timestamp"):
 		safe_snapshot["timestamp"] = Time.get_ticks_msec() / 1000.0
+	if not safe_snapshot.has("source"):
+		safe_snapshot["source"] = "godot"
+	if not safe_snapshot.has("origin"):
+		safe_snapshot["origin"] = "observer_snapshot"
 	snapshots.append(safe_snapshot)
 	_trim_array(snapshots, MAX_SNAPSHOTS)
 
@@ -155,6 +167,7 @@ func _note_from_event(event: Dictionary, created_day: int) -> Dictionary:
 	var hypothesis := "Preparation before night improves survival."
 	var tags := [event_type]
 	var hints := {"build_wall": 0.06, "place_aura_orb": 0.06}
+	var doctrines := []
 	match event_type:
 		"wall_destroyed", "structure_destroyed":
 			var structure_type := str(event.get("structure_type", "structure"))
@@ -163,6 +176,25 @@ func _note_from_event(event: Dictionary, created_day: int) -> Dictionary:
 			hypothesis = "Weak walls need damage or repair behind them."
 			tags.append_array(["structure_destroyed", structure_type])
 			hints = {"build_wall": 0.10, "place_aura_orb": 0.08, "build_repair_bench": 0.10}
+			doctrines = [{
+				"id": "%s_failure_repair_support" % structure_type,
+				"summary": "A broken wall means Ari should add repair tools and damage behind cover before more reflection.",
+				"when": {"structure_destroyed": structure_type},
+				"bias": {"build_repair_bench": 0.65, "place_aura_orb": 0.35, "build_wall": 0.20},
+				"plan": [
+					{
+						"affordance_id": "build_repair_bench",
+						"priority": 0.72,
+						"reason": "The last wall failed; tools make the next wall line recoverable.",
+					},
+					{
+						"affordance_id": "place_aura_orb",
+						"priority": 0.42,
+						"reason": "Repair needs damage behind the cover so enemies do not only chew stone.",
+					},
+				],
+				"confidence": 0.72,
+			}]
 		"structure_damaged":
 			var damaged_type := str(event.get("structure_type", "structure"))
 			title = "Day %d - %s started to crack" % [created_day, damaged_type.capitalize()]
@@ -219,9 +251,14 @@ func _note_from_event(event: Dictionary, created_day: int) -> Dictionary:
 		"tags": _string_array(tags, 8, 40),
 		"priority_hints": hints,
 		"priority_bias": hints,
+		"doctrines": doctrines,
 		"confidence": 0.45,
 		"thought": _thought_for_event(event_type),
 		"created_day": created_day,
+		"source": "local_fallback",
+		"failure_reason": "deterministic_event_reflection",
+		"origin": "event_fallback",
+		"evidence_ids": [_limit_text(str(event.get("event_id", "event_%04d" % int(event.get("sequence", 0)))), 120)],
 	}
 
 
@@ -229,6 +266,9 @@ func _validate_note(note: Dictionary) -> Dictionary:
 	var markdown_text := str(note.get("markdown_text", note.get("markdown", "")))
 	var hints := _priority_hints(note.get("priority_hints", note.get("priority_bias", {})))
 	return {
+		"note_id": _limit_text(str(note.get("note_id", note.get("id", ""))), 120),
+		"reflection_id": _limit_text(str(note.get("reflection_id", "")), 120),
+		"summary_id": _limit_text(str(note.get("summary_id", "")), 120),
 		"title": _limit_text(str(note.get("title", "Ari's rough local reflection")), 120),
 		"markdown_text": _limit_text(markdown_text, 2000),
 		"markdown": _limit_text(str(note.get("markdown", markdown_text)), 2000),
@@ -236,9 +276,14 @@ func _validate_note(note: Dictionary) -> Dictionary:
 		"tags": _string_array(note.get("tags", []), 8, 40),
 		"priority_hints": hints,
 		"priority_bias": hints,
+		"doctrines": _doctrines(note.get("doctrines", [])),
 		"confidence": clampf(float(note.get("confidence", 0.45)), 0.0, 1.0),
 		"thought": _limit_text(str(note.get("thought", "")), 300),
 		"created_day": int(note.get("created_day", 0)),
+		"source": _limit_text(str(note.get("source", "")), 64),
+		"failure_reason": _limit_text(str(note.get("failure_reason", "")), 64),
+		"origin": _limit_text(str(note.get("origin", "")), 80),
+		"evidence_ids": _string_array(note.get("evidence_ids", note.get("evidence_snapshot_ids", [])), 20, 120),
 	}
 
 
@@ -249,6 +294,11 @@ func _priority_hints(value) -> Dictionary:
 	for key in value.keys():
 		result[_limit_text(str(key), 80)] = clampf(float(value[key]), 0.0, 1.0)
 	return result
+
+
+func _doctrines(value) -> Array:
+	var doctrine_validator := AriDoctrine.new()
+	return doctrine_validator.add_doctrines(value)
 
 
 func _string_array(value, max_count: int, max_length: int) -> Array:

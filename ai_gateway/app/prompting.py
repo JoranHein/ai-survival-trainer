@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import json
 
-from .schemas import DeepInterpretationRequest, FastThoughtRequest
+from .schemas import (
+    AgentPlanRequest,
+    BackgroundJobRequest,
+    BridgePayloadRequest,
+    DeepInterpretationRequest,
+    FastThoughtRequest,
+    PredictionRequest,
+)
 
 
 DEEP_SYSTEM_PROMPT = """You are Ari's sign interpreter in a top-down survival game.
@@ -21,6 +28,33 @@ Return only valid JSON: {"thought":"string max 160 chars","resonance":0.0}.
 Do not mutate game state."""
 
 
+AGENT_PLAN_SYSTEM_PROMPT = """Output exactly one minified JSON object with only keys g,theory,plan,next,fb,why,belief,thought,c,after.
+plan is 1-3 legal action ids. next and fb are one legal action id each. belief is a short object of belief_key:number.
+No wrapper. No prose. Do not invent actions, coordinates, movement paths, or game-state mutations."""
+
+
+SCRIBE_SYSTEM_PROMPT = """You are Ari's lightweight observer-scribe.
+Read compact structured game snapshots and recent events. Write one short moment note about what Ari noticed or misunderstood.
+Return minified JSON only. Schema exactly: {"schema":"ari.scribe.note.v2","note":string,"facts":[string],"actions":[{"action":string,"status":string,"reason":string}],"dangers":[{"type":string,"distance":number,"severity":number}],"world_changes":[string],"tags":[string],"priority_hints":object,"plan_alignment":"aligned|supporting|mismatch|unknown","immediate_risk":"none|low|medium|high|lethal","risk_reason":string,"resource_blockers":[string],"mistake_candidates":[string],"opportunity_candidates":[string],"lesson_candidates":[string],"confidence":number,"salience":number}.
+facts/actions/dangers/world_changes must come from snapshots or events only. priority_hints may only bias future planning.
+Do not mutate game state. Do not invent actions. Keep note under 35 words and each list short."""
+
+
+LIBRARY_REFLECTION_SYSTEM_PROMPT = """Output exactly one minified JSON object with only keys t,m,changed,worked,wrong,mis,lesson,h,bias,belief,doctrine,thought,c.
+No wrapper. No prose. Use supplied facts only. h/bias/doctrine plan actions must be real Ari affordance ids.
+The engine owns movement, combat, building, resources, damage, and state mutation."""
+
+
+BACKGROUND_JOB_SYSTEM_PROMPT = """You are Ari's bounded background intelligence worker.
+Use compact summaries and strategy packets to improve Ari's future thinking without controlling his body.
+Return minified JSON only. Schema exactly: {"schema":"ari.background_result.v1","job_id":string,"kind":string,"context_hash":string,"status":"ok|fallback|stale","notes":[string],"priority_hints":object,"strategy_packet":{"schema":"ari.strategy_packet.v1","main_risks":[string],"current_lessons":[string],"active_doctrines":[object],"priority_hints":object,"avoid_repeating":[string],"try_next":[string],"evidence":[string],"confidence":number},"confidence":number}.
+Only use supplied facts. Priority hints may only name concrete survival affordance ids. Do not mutate game state."""
+
+
+PREDICTION_SYSTEM_PROMPT = """Output exactly one minified JSON object with only keys r,a,u,h,c.
+No response key. No wrapper. No prose. Use one listed legal action id. flying=>build_storm_rod if legal."""
+
+
 def deep_user_prompt(request: DeepInterpretationRequest) -> str:
     ari = request.ari
     world = request.world
@@ -32,9 +66,9 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
         [
             "Interpret any sign semantically against current physical affordances, rulebook, and Ari perception; affordance ids are not the vocabulary of the sign.",
             "Prefer concrete perception facts and available affordances over generic examples. If perception says a tool already exists, prefer using it before building another copy.",
-            "Available tools include walls, aura orb, tower/ranged attack, combat dummy, farm/food, rest, library, storm rod, mine_ore, smith_sword, train_sword, use_armor, rely_on_regen, regen_on_kill, fight_head_on, stall_until_dawn/hide_until_dawn.",
-            "Direct combat/no-hide signs: grounded_plan[0] should be train_combat/prepare_weapon/train_sword/smith_sword/mine_ore/fight_head_on and theory should be combat prep/sword/direct fighting. Do not use tower/range as top plan for generic killing unless sign names bow/arrows/range/tower.",
-            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. attack them around the corner with a bow => use_cover/ranged_attack/use_tower. the floor should fight or make the room dangerous => lure_to_aura/build_spike_trap/build_tar_pit/use_thorns. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide. the moon hates cowards => safe night tactic. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover; flying enemies ignore walls. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. build a mountain where arrows rain => build_tower/use_tower/ranged_attack/train_bow. think about what went wrong => reflect_library. do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore. prep can be train_combat/prepare_weapon. just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing. make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen.",
+            "Tools: walls, aura orb, tower/ranged attack, dummy, farm/food, rest, reflect_library, storm rod, mine_ore, smith_sword, train_sword, use_armor, rely_on_regen, regen_on_kill, fight_head_on, stall_until_dawn/hide_until_dawn.",
+            "Direct combat/no-hide signs: grounded_plan[0]=train_combat/prepare_weapon/train_sword/smith_sword/mine_ore/fight_head_on; theory should be combat prep/sword/direct fighting. Do not use tower/range as top plan for generic killing unless bow/range named.",
+            "Examples: stand behind the wall => use_existing_wall/wait_behind_wall/use_cover, not build_wall. use bow => use_tower/ranged_attack/train_bow/build_tower. attack them around the corner with a bow => use_cover/ranged_attack. the floor should fight or make the room dangerous => lure_to_aura/build_spike_trap/build_tar_pit/lure_to_tar_pit. ground grabs feet=>build_tar_pit/lure_to_tar_pit. warm=>build_fear_lantern/use_fear_lantern. false me=>build_decoy_idol/use_decoy_idol. become a silent spider and make the dead walk into your web => lure_to_aura/build_trap/use_thorns/hide. the moon hates cowards. the circle should eat the dead => lure_to_aura/place_aura_orb. the wings do not fear stone => build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack, not wall or cover; flying enemies ignore walls. my stomach is a second wall => farm_food/eat_food/eat/rest, not wall. do not hide, focus on killing enemies => fight_head_on/train_sword/smith_sword/mine_ore. just survive until morning => stall_until_dawn/hide_until_dawn/survive_until_morning/avoid_killing. make a sword that gives you life when they die => smith_sword/train_sword/regen_on_kill/rely_on_regen.",
             "Semantic cues for this sign: %s" % _semantic_cues(request),
             "Sign: %s" % request.sign_text[:1000],
             "Rulebook: %s" % _compact_json(request.rulebook, 1200),
@@ -76,7 +110,7 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
                 local_fallback.sign_strength,
                 local_fallback.resonance,
             ),
-            "Write Ari's own current interpretation from sign, rulebook, perception, and listed affordances.",
+            "Write Ari's current interpretation from sign, rulebook, perception, and affordances.",
             "Return JSON only. Do not invent unavailable actions. If a cue says not wall/cover, exclude wall/cover ids unless no other listed affordance fits.",
         ]
     )
@@ -84,6 +118,232 @@ def deep_user_prompt(request: DeepInterpretationRequest) -> str:
 
 def fast_user_prompt(request: FastThoughtRequest) -> str:
     return json.dumps(request.model_dump(), ensure_ascii=True, separators=(",", ":"))
+
+
+def agent_plan_user_prompt(request: AgentPlanRequest) -> str:
+    available_actions, unavailable_actions = _compact_legal_actions(request)
+    sign_text = request.sign.get("text", request.sign.get("interpretation", "")) if isinstance(request.sign, dict) else ""
+    world = request.world if isinstance(request.world, dict) else {}
+    ari = request.ari if isinstance(request.ari, dict) else {}
+    strategy = request.strategy_packet if isinstance(request.strategy_packet, dict) else {}
+    compact_world = {
+        "day": world.get("day", ""),
+        "phase": world.get("phase", ""),
+        "time": world.get("time_left", ""),
+        "stone": world.get("stone", ""),
+        "food": world.get("food", ""),
+        "ore": world.get("ore", ""),
+        "enemies": world.get("enemy_type_counts", {}),
+        "walls": world.get("wall_count", world.get("walls", "")),
+        "towers": world.get("bow_tower_count", world.get("towers", "")),
+        "storm": world.get("storm_rod_count", world.get("storm_rods", "")),
+        "damaged": world.get("damaged_structure_count", ""),
+    }
+    compact_ari = {
+        "hp": ari.get("hp_ratio", ari.get("hp", "")),
+        "fear": ari.get("fear", ""),
+        "hunger": ari.get("hunger", ""),
+        "job": ari.get("current_job", ""),
+    }
+    return "\n".join(
+        [
+            "Pick Ari's next survival action from legal ids only. Return compact JSON keys g,theory,plan,next,fb,why,belief,thought,c,after.",
+            "cues mountain/arrows=>build_tower; wings=>build_storm_rod; survive morning=>use_cover/flee/stall_until_dawn; no-hide combat=>train_sword/fight_head_on if safe.",
+            "Rule: first plan id should equal next. doctrine prereq: if a learned plan needs an unbuilt structure, choose that build id or its resource action first.",
+            "kind=%s sign=%s" % (request.decision_kind[:60], str(sign_text)[:260]),
+            "ari=%s world=%s" % (_compact_json(compact_ari, 220), _compact_json(compact_world, 420)),
+            "strategy=%s" % _compact_json({
+                "risk": strategy.get("main_risks", []),
+                "lessons": strategy.get("current_lessons", []),
+                "hints": strategy.get("priority_hints", {}),
+                "avoid": strategy.get("avoid_repeating", []),
+                "try": strategy.get("try_next", []),
+            }, 520),
+            "panel=%s" % _compact_json(_compact_action_control_panel(request.action_control_panel, 12), 950),
+            "doctrine_plan=%s doctrines=%s" % (_compact_json(request.active_doctrine_plan[:4], 360), _compact_json(request.active_doctrines[:3], 360)),
+            "recent=%s current=%s" % (_compact_json(request.recent_outcomes[:4], 320), _compact_json(request.current_plan, 280)),
+            "legal_ok=%s legal_blocked=%s" % (available_actions, unavailable_actions),
+            "fallback=%s" % _compact_json(_compact_agent_fallback(request.local_fallback), 300),
+            "JSON contract: g/theory/why/thought are short strings; plan is 1-3 ids from legal_ok; next is plan[0]; fb is one id from legal_ok; belief is key:number; c is 0..1; after is seconds.",
+        ]
+    )
+
+
+def scribe_user_prompt(request: BridgePayloadRequest) -> str:
+    payload = request.payload
+    return "\n".join(
+        [
+            "Write one compact moment note from structured facts only.",
+            "Current sign: %s" % str(payload.get("current_sign", payload.get("sign", "")))[:400],
+            "Phase/day: day=%s phase=%s" % (payload.get("day", ""), payload.get("phase", "")),
+            "Active plan: %s" % _compact_json(payload.get("active_plan", {}), 600),
+            "Recent events: %s" % _compact_json(_slice_list(payload.get("recent_events", []), 12), 1200),
+            "Recent snapshots: %s" % _compact_json(_slice_list(payload.get("snapshots", payload.get("recent_snapshots", [])), 6), 1600),
+            "Return JSON only with schema ari.scribe.note.v2. Extract facts/actions/dangers/world_changes from supplied facts only. Include plan_alignment, immediate_risk, blockers, mistake/opportunity/lesson candidates. priority_hints may contain only concrete survival affordance ids.",
+        ]
+    )
+
+
+def library_reflection_user_prompt(request: BridgePayloadRequest) -> str:
+    payload = request.payload
+    day_summary = payload.get("day_summary", {})
+    compact_summary = _compact_day_summary(day_summary)
+    compact_notes = _compact_scribe_notes(payload.get("scribe_notes", []), 4)
+    compact_events = _compact_reflection_events(payload.get("recent_events", []), 8)
+    compact_outcomes = _compact_reflection_outcomes(payload.get("agent_plan_outcomes", []), 5)
+    return "\n".join(
+        [
+            "Ari nightly reflection. Use Day summary first; details only support it.",
+            "meta trigger=%s day=%s outcome=%s" % (payload.get("trigger", ""), payload.get("day", ""), payload.get("outcome", "")),
+            "Sign: %s" % _compact_json(payload.get("sign", {}), 280),
+            "Day summary: %s" % _compact_json(compact_summary, 620),
+            "Recent events: %s" % _compact_json(compact_events, 360),
+            "Scribe notes: %s" % _compact_json(compact_notes, 420),
+            "Agent outcomes: %s" % _compact_json(compact_outcomes, 280),
+            "Active doctrines: %s" % _compact_json(_compact_reflection_doctrines(payload.get("active_doctrines", []), 3), 300),
+            'Return JSON like {"t":"Wings Over Stone","m":"Ari saw wings cross the wall.","chg":["flying enemies appeared"],"ok":["storm rod plan helped"],"bad":["walls stayed first too long"],"mis":["treated flying like ground danger"],"lesson":"Build storm rod before extra walls when wings appear.","h":{"build_storm_rod":0.8},"bias":{"build_storm_rod":0.4,"build_wall":-0.1},"belief":{"wings_ignore_walls":0.25},"plan":["build_storm_rod"],"thought":"Stone is not sky.","c":0.7}.',
+        ]
+    )
+
+
+def background_job_user_prompt(request: BackgroundJobRequest) -> str:
+    payload = request.payload if isinstance(request.payload, dict) else {}
+    return "\n".join(
+        [
+            "Bounded background job. Use only current facts and matching context_hash.",
+            "Job id=%s kind=%s pri=%s ctx=%s exp=%.1f now=%.1f"
+            % (
+                request.job_id[:120],
+                request.kind,
+                request.priority,
+                request.context_hash[:160],
+                request.expires_at_game_time,
+                request.current_game_time,
+            ),
+            "Sign: %s" % str(payload.get("current_sign", ""))[:220],
+            "Rolling summary: %s" % _compact_json(_compact_rolling_summary(payload.get("rolling_summary", {})), 1000),
+            "Day summary: %s" % _compact_json(payload.get("day_summary", {}), 1600),
+            "Strategy packet: %s" % _compact_json(payload.get("strategy_packet", {}), 1400),
+            "Recent scribe notes: %s" % _compact_json(_slice_list(payload.get("recent_scribe_notes", []), 3), 600),
+            "Active plan: %s" % _compact_json(payload.get("active_plan", {}), 500),
+            'JSON only, no placeholders: {"s":"ok","n":["wings make mining unsafe"],"h":{"build_storm_rod":0.6},"try":["build_storm_rod"],"avoid":["mine_stone"],"c":0.5}.',
+        ]
+    )
+
+
+def prediction_user_prompt(request: PredictionRequest) -> str:
+    legal_available = [item.id for item in request.legal_actions if item.available]
+    risks = [
+        {"t": risk.type[:24], "d": round(risk.distance, 1), "s": round(risk.severity, 2)}
+        for risk in request.risks[:4]
+    ]
+    strategy = request.strategy_packet if isinstance(request.strategy_packet, dict) else {}
+    hints = strategy.get("priority_hints", {}) if isinstance(strategy, dict) else {}
+    lessons = strategy.get("current_lessons", []) if isinstance(strategy, dict) else []
+    rolling = _compact_rolling_summary(request.rolling_summary)
+    return "\n".join(
+        [
+            "ctx=%s phase=%s t=%.0f hp=%s action=%s"
+            % (
+                request.context_hash[:80],
+                request.phase[:16],
+                request.time_left,
+                str(request.ari.get("hp", ""))[:12] if isinstance(request.ari, dict) else "",
+                str(request.ari.get("current_action", ""))[:60] if isinstance(request.ari, dict) else "",
+            ),
+            "risk=%s threats=%s blockers=%s mismatch=%s"
+            % (
+                str(rolling.get("risk", ""))[:40],
+                ",".join(rolling.get("threats", [])) if isinstance(rolling.get("threats", []), list) else "",
+                ",".join(rolling.get("blockers", [])) if isinstance(rolling.get("blockers", []), list) else "",
+                ";".join(rolling.get("mismatch", []))[:180] if isinstance(rolling.get("mismatch", []), list) else "",
+            ),
+            "risks=%s res=%s plan=%s" % (_compact_json(risks, 180), _compact_json(request.resources, 120), _compact_json(request.current_plan, 140)),
+            "hints=%s lessons=%s" % (_compact_json(hints, 160), _compact_json(_slice_list(lessons, 2), 160)),
+            "panel=%s" % _prediction_action_panel_text(request.action_control_panel, 8),
+            "legal=%s" % (",".join(legal_available[:16]) or "none"),
+            'example={"r":"high","a":"build_storm_rod","u":0.8,"h":{"build_storm_rod":0.8},"c":0.6}',
+        ]
+    )
+
+
+def _compact_day_summary(summary: object) -> dict[str, object]:
+    if not isinstance(summary, dict):
+        return {}
+    compact: dict[str, object] = {
+        "timeline": [str(value)[:90] for value in _slice_list(summary.get("timeline", []), 3)],
+        "changed": [str(value)[:70] for value in _slice_list(summary.get("what_changed", []), 4)],
+        "worked": [str(value)[:70] for value in _slice_list(summary.get("worked", []), 3)],
+        "wrong": [str(value)[:80] for value in _slice_list(summary.get("went_wrong", []), 4)],
+        "mis": [str(value)[:80] for value in _slice_list(summary.get("misunderstood", []), 3)],
+        "mismatch": [str(value)[:90] for value in _slice_list(summary.get("plan_mismatches", []), 3)],
+        "blockers": [str(value)[:70] for value in _slice_list(summary.get("resource_blockers", []), 3)],
+        "threats": [str(value)[:40] for value in _slice_list(summary.get("threats", []), 4)],
+        "lessons": [str(value)[:100] for value in _slice_list(summary.get("candidate_lessons", []), 4)],
+        "hints": [str(value)[:50] for value in _slice_list(summary.get("recommended_priority_hints", []), 4)],
+        "evidence": [str(value)[:60] for value in _slice_list(summary.get("evidence_snapshot_ids", []), 4)],
+    }
+    return {key: value for key, value in compact.items() if value not in ("", [], {})}
+
+
+def _compact_scribe_notes(notes: object, max_notes: int) -> list[dict[str, object]]:
+    compact: list[dict[str, object]] = []
+    for raw in _slice_list(notes, max_notes):
+        if not isinstance(raw, dict):
+            continue
+        item: dict[str, object] = {
+            "note": str(raw.get("note", ""))[:120],
+            "risk": str(raw.get("immediate_risk", ""))[:24],
+            "align": str(raw.get("plan_alignment", ""))[:24],
+            "tags": [str(value)[:40] for value in _slice_list(raw.get("tags", []), 4)],
+            "mistakes": [str(value)[:70] for value in _slice_list(raw.get("mistake_candidates", []), 2)],
+            "lessons": [str(value)[:80] for value in _slice_list(raw.get("lesson_candidates", []), 2)],
+        }
+        compact.append({key: value for key, value in item.items() if value not in ("", [], {})})
+    return compact
+
+
+def _compact_reflection_events(events: object, max_events: int) -> list[dict[str, object]]:
+    compact: list[dict[str, object]] = []
+    for raw in _slice_list(events, max_events):
+        if not isinstance(raw, dict):
+            continue
+        event_type = str(raw.get("type", raw.get("event", "")))[:50]
+        item: dict[str, object] = {"type": event_type}
+        for key in ("enemy_type", "action_id", "outcome", "phase"):
+            value = str(raw.get(key, ""))[:50]
+            if value:
+                item[key] = value
+        compact.append(item)
+    return compact
+
+
+def _compact_reflection_outcomes(outcomes: object, max_outcomes: int) -> list[dict[str, object]]:
+    compact: list[dict[str, object]] = []
+    for raw in _slice_list(outcomes, max_outcomes):
+        if not isinstance(raw, dict):
+            continue
+        item = {
+            "action": str(raw.get("action_id", raw.get("action", "")))[:70],
+            "outcome": str(raw.get("outcome", raw.get("status", "")))[:70],
+        }
+        compact.append({key: value for key, value in item.items() if value})
+    return compact
+
+
+def _compact_reflection_doctrines(doctrines: object, max_doctrines: int) -> list[dict[str, object]]:
+    compact: list[dict[str, object]] = []
+    for raw in _slice_list(doctrines, max_doctrines):
+        if not isinstance(raw, dict):
+            continue
+        item: dict[str, object] = {
+            "id": str(raw.get("id", ""))[:70],
+            "summary": str(raw.get("summary", raw.get("title", "")))[:100],
+            "bias": raw.get("bias", raw.get("priority_bias", {})),
+            "plan": _slice_list(raw.get("plan", []), 2),
+        }
+        compact.append({key: value for key, value in item.items() if value not in ("", [], {})})
+    return compact
 
 
 def _compact_affordances(request: DeepInterpretationRequest) -> tuple[str, str]:
@@ -96,6 +356,144 @@ def _compact_affordances(request: DeepInterpretationRequest) -> tuple[str, str]:
             reason = item.reason_unavailable.strip() or "unavailable"
             unavailable.append("%s(%s)" % (item.id, reason[:48]))
     return ",".join(available) or "none", ",".join(unavailable) or "none"
+
+
+def _compact_legal_actions(request: AgentPlanRequest) -> tuple[str, str]:
+    available: list[str] = []
+    unavailable: list[str] = []
+    for item in request.legal_actions:
+        if item.available:
+            available.append(item.id)
+        else:
+            reason = item.reason_unavailable.strip() or "unavailable"
+            unavailable.append("%s(%s)" % (item.id, reason[:48]))
+    return ",".join(available) or "none", ",".join(unavailable) or "none"
+
+
+def _compact_action_control_panel(panel: object, max_actions: int) -> dict[str, object]:
+    if not isinstance(panel, dict):
+        return {}
+    raw_actions = panel.get("actions", [])
+    if not isinstance(raw_actions, list):
+        raw_actions = []
+    actions: list[dict[str, object]] = []
+    for raw in raw_actions[:max_actions]:
+        if not isinstance(raw, dict):
+            continue
+        item: dict[str, object] = {
+            "id": str(raw.get("id", ""))[:80],
+            "ok": bool(raw.get("available", True)),
+            "cat": str(raw.get("category", ""))[:40],
+            "why": str(raw.get("description", ""))[:90],
+        }
+        reason = str(raw.get("reason_unavailable", ""))[:80]
+        if reason:
+            item["blocked"] = reason
+        counters = _slice_list(raw.get("counters", []), 4)
+        if counters:
+            item["counters"] = [str(value)[:40] for value in counters]
+        enables = _slice_list(raw.get("enables", []), 4)
+        if enables:
+            item["enables"] = [str(value)[:40] for value in enables]
+        preconditions = _slice_list(raw.get("preconditions", []), 4)
+        if preconditions:
+            item["needs"] = [str(value)[:40] for value in preconditions]
+        good_when = _slice_list(raw.get("good_when", []), 4)
+        if good_when:
+            item["good"] = [str(value)[:40] for value in good_when]
+        failure_modes = _slice_list(raw.get("failure_modes", []), 3)
+        if failure_modes:
+            item["fails"] = [str(value)[:48] for value in failure_modes]
+        cost = raw.get("cost", {})
+        if isinstance(cost, dict) and cost:
+            item["cost"] = {str(key)[:40]: cost[key] for key in list(cost.keys())[:3]}
+        actions.append(item)
+    if not actions:
+        return {}
+    return {
+        "schema": str(panel.get("schema", "ari.action_control_panel.v1"))[:80],
+        "actions": actions,
+    }
+
+
+def _prediction_action_panel_text(panel: object, max_actions: int) -> str:
+    if not isinstance(panel, dict):
+        return "none"
+    raw_actions = panel.get("actions", [])
+    if not isinstance(raw_actions, list):
+        return "none"
+    parts: list[str] = []
+    for raw in raw_actions[:max_actions]:
+        if not isinstance(raw, dict):
+            continue
+        action_id = str(raw.get("id", ""))[:80]
+        if not action_id:
+            continue
+        status = "ok" if bool(raw.get("available", True)) else "blocked:%s" % str(raw.get("reason_unavailable", ""))[:36]
+        details: list[str] = [status]
+        category = str(raw.get("category", ""))[:24]
+        if category:
+            details.append(category)
+        counters = [str(value)[:24] for value in _slice_list(raw.get("counters", []), 3)]
+        if counters:
+            details.append("counters:%s" % ",".join(counters))
+        enables = [str(value)[:24] for value in _slice_list(raw.get("enables", []), 3)]
+        if enables:
+            details.append("enables:%s" % ",".join(enables))
+        preconditions = [str(value)[:28] for value in _slice_list(raw.get("preconditions", []), 3)]
+        if preconditions:
+            details.append("needs:%s" % ",".join(preconditions))
+        good_when = [str(value)[:28] for value in _slice_list(raw.get("good_when", []), 3)]
+        if good_when:
+            details.append("good:%s" % ",".join(good_when))
+        failure_modes = [str(value)[:32] for value in _slice_list(raw.get("failure_modes", []), 2)]
+        if failure_modes:
+            details.append("fails:%s" % ",".join(failure_modes))
+        cost = raw.get("cost", {})
+        if isinstance(cost, dict) and cost:
+            details.append("cost:%s" % ",".join("%s%s" % (str(key)[:12], str(cost[key])[:8]) for key in list(cost.keys())[:2]))
+        why = str(raw.get("description", ""))[:70]
+        if why:
+            details.append(why)
+        parts.append("%s(%s)" % (action_id, ",".join(details)))
+    return ";".join(parts)[:650] or "none"
+
+
+def _compact_rolling_summary(summary: object) -> dict[str, object]:
+    if not isinstance(summary, dict):
+        return {}
+    compact: dict[str, object] = {
+        "schema": str(summary.get("schema", "ari.rolling_tactical_summary.v1"))[:80],
+        "risk": str(summary.get("risk_level", "none"))[:40],
+        "threats": [str(value)[:40] for value in _slice_list(summary.get("threats", []), 5)],
+        "actions": [str(value)[:70] for value in _slice_list(summary.get("current_actions", []), 4)],
+        "plan": [str(value)[:70] for value in _slice_list(summary.get("plan_actions", []), 4)],
+        "mismatch": [str(value)[:120] for value in _slice_list(summary.get("plan_mismatches", []), 4)],
+        "blockers": [str(value)[:60] for value in _slice_list(summary.get("resource_blockers", []), 4)],
+        "changes": [str(value)[:70] for value in _slice_list(summary.get("world_changes", []), 4)],
+        "lessons": [str(value)[:100] for value in _slice_list(summary.get("lesson_candidates", []), 4)],
+    }
+    hints = summary.get("priority_hints", {})
+    if isinstance(hints, dict):
+        compact["hints"] = {str(key)[:60]: hints[key] for key in list(hints.keys())[:5]}
+    return {key: value for key, value in compact.items() if value not in ("", [], {})}
+
+
+def _compact_agent_fallback(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or not value:
+        return {}
+    return {
+        "next_action": _choice_id(value.get("next_action", {})),
+        "fallback_action": _choice_id(value.get("fallback_action", {})),
+        "plan": [_choice_id(item) for item in _slice_list(value.get("plan", []), 2) if _choice_id(item)],
+        "confidence": value.get("confidence", 0.0),
+    }
+
+
+def _choice_id(value: object) -> str:
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get("action_id") or value.get("affordance_id") or value.get("id") or "").strip()
 
 
 def _compact_perception(perception: dict[str, object]) -> dict[str, object]:
@@ -145,10 +543,16 @@ def _semantic_cues(request: DeepInterpretationRequest) -> str:
         cues.append("aura circle lure; prefer lure_to_aura/place_aura_orb")
     if any(word in sign for word in ["spider", "web"]):
         cues.append("web means lure/trap/patient avoidance; prefer lure_to_aura/build_trap/use_thorns/hide if listed")
+    if any(word in sign for word in ["mud", "tar", "sticky", "stuck", "sink", "mire", "ground grab", "feet"]):
+        cues.append("slow ground means build_tar_pit first, then lure_to_tar_pit if a tar pit exists")
+    if any(word in sign for word in ["warm", "warmth", "lantern", "lamp"]) and any(word in sign for word in ["fear", "afraid", "scared", "safe"]):
+        cues.append("warm fear light means build_fear_lantern first, then use_fear_lantern if it exists")
+    if any(word in sign for word in ["false", "decoy", "idol", "bait", "dummy"]) and any(word in sign for word in ["me", "self", "teeth", "take", "draw", "lure", "distract"]):
+        cues.append("false self bait means build_decoy_idol first, then use_decoy_idol if it exists")
     if any(word in sign for word in ["wing", "wings", "flying", "sky", "air"]):
-        cues.append("sky threat; wall/cover fails; prefer build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack")
-    if "arrow" in sign or "arrows" in sign or "mountain" in sign:
-        cues.append("height and arrows; prefer build_tower/use_tower/ranged_attack/train_bow")
+        cues.append("sky threat; wall/cover fails; prefer build_storm_rod/anti_flying/sky_answer/use_tower/ranged_attack; after storm exists, add tower/ranged support")
+    if any(word in sign for word in ["bow", "arrow", "arrows", "shoot", "ranged", "range"]) or "mountain" in sign:
+        cues.append("bow/ranged intent; prefer use_tower/ranged_attack/train_bow/build_tower")
     if any(word in sign for word in ["stomach", "hunger", "hungry", "food"]):
         cues.append("body safety through food; prefer farm_food/eat_food/eat/rest; wall ids=0")
     if "time for myself" in sign or "quiet" in sign or "rest" in sign:

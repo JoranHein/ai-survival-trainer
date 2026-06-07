@@ -39,14 +39,22 @@ func clear_life() -> void:
 
 func _validate_note(note: Dictionary) -> Dictionary:
 	return {
+		"note_id": _limit_text(str(note.get("note_id", note.get("id", ""))), 120),
+		"reflection_id": _limit_text(str(note.get("reflection_id", "")), 120),
+		"summary_id": _limit_text(str(note.get("summary_id", "")), 120),
 		"title": _limit_text(str(note.get("title", "Ari's rough local reflection")), 120),
 		"markdown": _limit_text(str(note.get("markdown", "")), 2000),
 		"hypothesis": _limit_text(str(note.get("hypothesis", "")), 300),
 		"plan": _dictionary_copy(note.get("plan", {})),
 		"priority_bias": _priority_bias(note.get("priority_bias", {})),
+		"doctrines": _doctrines(note.get("doctrines", [])),
 		"confidence": clampf(float(note.get("confidence", 0.0)), 0.0, 1.0),
 		"thought": _limit_text(str(note.get("thought", "")), 300),
 		"created_day": int(note.get("created_day", 0)),
+		"source": _limit_text(str(note.get("source", "")), 64),
+		"failure_reason": _limit_text(str(note.get("failure_reason", "")), 64),
+		"origin": _limit_text(str(note.get("origin", "")), 80),
+		"evidence_ids": _string_array(note.get("evidence_ids", note.get("evidence_snapshot_ids", [])), 20, 120),
 	}
 
 
@@ -63,6 +71,24 @@ func _dictionary_copy(value) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
 		return {}
 	return value.duplicate(true)
+
+
+func _string_array(value, max_count: int, max_length: int) -> Array:
+	var result := []
+	if typeof(value) != TYPE_ARRAY:
+		return result
+	for item in value:
+		if result.size() >= max_count:
+			break
+		var text := _limit_text(str(item), max_length)
+		if text != "" and not result.has(text):
+			result.append(text)
+	return result
+
+
+func _doctrines(value) -> Array:
+	var doctrine_validator := AriDoctrine.new()
+	return doctrine_validator.add_doctrines(value)
 
 
 func _copy_array(source: Array) -> Array:

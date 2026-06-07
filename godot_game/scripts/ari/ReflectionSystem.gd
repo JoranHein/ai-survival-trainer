@@ -36,6 +36,7 @@ func _validate_reflection(note: Dictionary) -> Dictionary:
 		"plan": note.get("plan", {}).duplicate(true) if typeof(note.get("plan", {})) == TYPE_DICTIONARY else {},
 		"priority_hints": hints,
 		"priority_bias": hints,
+		"doctrines": _doctrines(note.get("doctrines", [])),
 		"confidence": clampf(float(note.get("confidence", 0.35)), 0.0, 1.0),
 		"thought": _limit_text(str(note.get("thought", "")), 300),
 		"created_day": int(note.get("created_day", 0)),
@@ -62,6 +63,11 @@ func _string_array(value, max_count: int, max_length: int) -> Array:
 		if text != "" and not result.has(text):
 			result.append(text)
 	return result
+
+
+func _doctrines(value) -> Array:
+	var doctrine_validator := AriDoctrine.new()
+	return doctrine_validator.add_doctrines(value)
 
 
 func _get_bridge() -> AIBridge:
