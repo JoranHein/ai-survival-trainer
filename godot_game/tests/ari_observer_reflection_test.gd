@@ -19,10 +19,12 @@ func _run() -> void:
 	await _test_local_stub_scribe_keeps_quiet_phase_change_out_of_note_text()
 	await _test_local_stub_scribe_marks_body_plan_mismatch()
 	await _test_local_stub_scribe_marks_plan_support_without_mismatch()
+	await _test_local_stub_scribe_marks_alignment_trace_prerequisite_progress()
 	await _test_local_stub_scribe_marks_defensive_hold_as_plan_support()
 	await _test_local_stub_scribe_marks_recovery_as_plan_support()
 	await _test_local_library_reflection_fallback_learns_from_flying_scribe()
 	await _test_day_summary_and_strategy_packet_feed_ai_pipeline()
+	await _test_day_summary_keeps_understanding_and_prerequisite_progress()
 	await _test_provenance_and_learning_trace_link_ai_pipeline()
 	await _test_rolling_tactical_summary_feeds_fast_prediction_and_background()
 	await _test_background_ai_jobs_discard_stale_results()
@@ -265,6 +267,42 @@ func _test_local_stub_scribe_marks_plan_support_without_mismatch() -> void:
 	bridge.free()
 
 
+func _test_local_stub_scribe_marks_alignment_trace_prerequisite_progress() -> void:
+	var bridge: AIBridge = AIBridgeScript.new()
+	var note: Dictionary = bridge.call("_local_stub_scribe", {
+		"recent_events": [{"type": "resource_collected", "resource": "stone"}],
+		"active_plan": {"next_action": "build_storm_rod"},
+		"snapshots": [{
+			"ari": {
+				"current_action": "mine_stone",
+				"current_reason": "Need stone before a Storm Rod can be built.",
+			},
+			"plan": {"next_action": "build_storm_rod"},
+			"body_alignment": {
+				"relation": "prerequisite_progress",
+				"planned_action": "build_storm_rod",
+				"body_job": "mine_stone",
+				"reason": "Mining stone unlocks Storm Rod.",
+			},
+			"world": {
+				"resources": {"stone": 0},
+				"enemies": {"count": 1, "types": {"flying": 1}},
+				"nearest_danger": {"type": "flying", "distance": 96.0},
+				"notable_changes": ["first_flying_enemy_seen"],
+			},
+		}],
+	})
+	var note_text := str(note.get("note", "")).to_lower()
+	_assert(note_text.contains("supporting plan build storm rod"), "local scribe should describe prerequisite progress as support")
+	_assert(not note_text.contains("while plan expected build storm rod"), "local scribe should not frame prerequisite progress as contradiction")
+	_assert(note.get("tags", []).has("plan_support"), "local scribe should tag prerequisite progress as plan support")
+	_assert(not note.get("tags", []).has("plan_body_mismatch"), "local scribe should not tag prerequisite progress as mismatch")
+	_assert(note.get("world_changes", []).has("prerequisite_progress"), "local scribe should expose prerequisite progress for reflection")
+	var actions: Array = note.get("actions", [])
+	_assert(actions.has({"action": "build_storm_rod", "status": "supported", "reason": "Mining stone unlocks Storm Rod."}), "local scribe should keep the planned action as explicitly supported by the alignment trace")
+	bridge.free()
+
+
 func _test_local_stub_scribe_marks_defensive_hold_as_plan_support() -> void:
 	var bridge: AIBridge = AIBridgeScript.new()
 	var note: Dictionary = bridge.call("_local_stub_scribe", {
@@ -449,6 +487,87 @@ func _test_day_summary_and_strategy_packet_feed_ai_pipeline() -> void:
 
 	var planner_payload: Dictionary = world.call("_build_agent_plan_payload", "night_reflection")
 	_assert(planner_payload.get("strategy_packet", {}).get("schema", "") == "ari.strategy_packet.v1", "planner payload should include compact strategy packet")
+
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
+
+
+func _test_day_summary_keeps_understanding_and_prerequisite_progress() -> void:
+	var world: World = await _make_world()
+	var memory = world.get("ari_memory")
+	var chronicle = world.get("chronicle")
+	world.call("commit_sign", "build high when wings come")
+	if world.has_method("_refresh_ari_understanding"):
+		world.call("_refresh_ari_understanding", "test")
+	memory.record_snapshot({
+		"schema": "ari.observer.snapshot.v1",
+		"snapshot_id": "day2_0008_prereq",
+		"day": 2,
+		"phase": "morning",
+		"trigger": "timer",
+		"salience": 0.65,
+		"ari": {
+			"current_action": "mine_stone",
+			"current_reason": "Need stone before a Storm Rod can be built.",
+		},
+		"sign": {
+			"text": "build high when wings come",
+			"interpretation": "prepare anti-flying defense",
+		},
+		"plan": {"next_action": "build_storm_rod"},
+		"understanding": {
+			"schema": "ari.understanding.v1",
+			"sign_thesis": "Ari reads the sign as sky danger.",
+			"prerequisite_ladder": [
+				{"action_id": "mine_stone", "status": "needed", "reason": "Need stone."},
+				{"action_id": "build_storm_rod", "status": "blocked", "reason": "Needs stone."},
+			],
+		},
+		"body_alignment": {
+			"relation": "prerequisite_progress",
+			"planned_action": "build_storm_rod",
+			"body_job": "mine_stone",
+			"reason": "Mining stone unlocks Storm Rod.",
+		},
+		"world": {
+			"resources": {"stone": 0, "food": 1, "ore": 0},
+			"structures": {"walls": 1, "towers": 0, "storm_rods": 0, "damaged": 0},
+			"enemies": {"count": 1, "types": {"flying": 1}},
+			"nearest_danger": {"type": "flying", "distance": 88.0},
+			"notable_changes": ["first_flying_enemy_seen"],
+		},
+	})
+	chronicle.add_scribe_note({
+		"schema": "ari.scribe.note.v2",
+		"note": "Ari mined stone, supporting plan build storm rod.",
+		"tags": ["danger:flying", "plan_support"],
+		"facts": ["Mining stone unlocks Storm Rod."],
+		"actions": [
+			{"action": "mine_stone", "status": "in_progress", "reason": "Need stone before a Storm Rod can be built."},
+			{"action": "build_storm_rod", "status": "supported", "reason": "Mining stone unlocks Storm Rod."},
+		],
+		"dangers": [{"type": "flying", "distance": 88.0, "severity": 0.8}],
+		"world_changes": ["first_flying_enemy_seen", "prerequisite_progress"],
+		"priority_hints": {"build_storm_rod": 0.8, "mine_stone": 0.55},
+		"plan_alignment": "supporting",
+		"immediate_risk": "high",
+		"risk_reason": "Flying enemies ignore ordinary walls.",
+		"resource_blockers": ["low_stone"],
+		"lesson_candidates": ["when wings appear, gather stone for a sky answer"],
+		"confidence": 0.8,
+		"salience": 0.75,
+	})
+
+	var summary: Dictionary = world.call("_build_day_summary", "dawn_survived", "survived") if world.has_method("_build_day_summary") else {}
+	_assert(summary.get("schema", "") == "ari.day_summary.v1", "day summary should carry schema for prerequisite progress checks")
+	_assert(summary.get("prerequisite_progress", []).size() >= 1, "day summary should preserve prerequisite progress separately from mismatch")
+	_assert(summary.get("plan_mismatches", []).is_empty(), "day summary should not convert prerequisite progress into a plan mismatch")
+	_assert(summary.get("current_understanding", {}).get("schema", "") == "ari.understanding.v1", "day summary should preserve compact current Ari understanding")
+
+	var strategy: Dictionary = world.call("_build_strategy_packet", "dawn_survived") if world.has_method("_build_strategy_packet") else {}
+	_assert(strategy.get("understanding", {}).get("schema", "") == "ari.understanding.v1", "strategy packet should thread current Ari understanding")
+	_assert(_array_text_contains(strategy.get("prerequisite_progress", []), "Storm Rod"), "strategy packet should expose prerequisite progress to planning")
 
 	root.remove_child(world)
 	world.queue_free()

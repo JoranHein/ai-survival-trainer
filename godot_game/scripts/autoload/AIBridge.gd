@@ -1361,6 +1361,7 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 	var nearest_danger_distance := 0.0
 	var recent_damage := 0.0
 	var planned_action := ""
+	var body_alignment := {}
 	var evidence_ids: Array[String] = []
 	var active_plan = payload.get("active_plan", {})
 	if typeof(active_plan) == TYPE_DICTIONARY:
@@ -1369,6 +1370,9 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 			planned_action = str(raw_next_action.get("action_id", raw_next_action.get("id", ""))).strip_edges()
 		else:
 			planned_action = str(raw_next_action).strip_edges()
+	var payload_alignment = payload.get("body_alignment", {})
+	if typeof(payload_alignment) == TYPE_DICTIONARY:
+		body_alignment = payload_alignment.duplicate(true)
 	var snapshots: Array = payload.get("snapshots", payload.get("recent_snapshots", []))
 	var snapshot_rows: Array = []
 	for snapshot in snapshots:
@@ -1384,6 +1388,11 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 		var latest_plan = latest.get("plan", {})
 		if typeof(latest_plan) == TYPE_DICTIONARY and planned_action == "":
 			planned_action = str(latest_plan.get("next_action", "")).strip_edges()
+		var latest_alignment = latest.get("body_alignment", {})
+		if typeof(latest_alignment) == TYPE_DICTIONARY:
+			body_alignment = latest_alignment.duplicate(true)
+			if planned_action == "":
+				planned_action = str(body_alignment.get("planned_action", "")).strip_edges()
 		var evidence := _select_scribe_evidence_snapshot(snapshot_rows)
 		var evidence_id := str(evidence.get("snapshot_id", "")).strip_edges()
 		if evidence_id != "":
@@ -1419,6 +1428,14 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 			world_changes = _string_array(evidence_world.get("notable_changes", []), 6, 80)
 	_preserve_recent_flying_scribe_evidence(snapshot_rows, facts, world_changes, priority_hints, evidence_ids)
 	var plan_relation := _scribe_plan_relation(current_action, current_reason, planned_action)
+	var alignment_relation := str(body_alignment.get("relation", "")).strip_edges()
+	var alignment_reason := str(body_alignment.get("reason", "")).strip_edges()
+	if alignment_relation == "accepted":
+		plan_relation = "aligned"
+	elif alignment_relation == "prerequisite_progress" or alignment_relation == "safety_substitution":
+		plan_relation = "support"
+	elif alignment_relation == "mismatch":
+		plan_relation = "mismatch"
 	var plan_body_mismatch := plan_relation == "mismatch"
 	var plan_support := plan_relation == "support"
 	current_reason = _sanitize_scribe_current_reason(current_reason, current_action)
@@ -1429,7 +1446,8 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 		actions.append({"action": planned_action, "status": "planned", "reason": "Ari's active plan expected this action."})
 		facts.append("Ari's body action did not match the active plan: planned %s." % _humanize_key(planned_action))
 	elif plan_support:
-		actions.append({"action": planned_action, "status": "supported", "reason": "Ari's current action prepared or protected this plan."})
+		var support_reason := alignment_reason if alignment_reason != "" else "Ari's current action prepared or protected this plan."
+		actions.append({"action": planned_action, "status": "supported", "reason": support_reason})
 		facts.append("Ari's body action supported the active plan: planned %s." % _humanize_key(planned_action))
 	if last_event_type != "none":
 		facts.append("Recent event was %s." % _humanize_key(last_event_type))
@@ -1452,6 +1470,12 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 		tags.append("plan_support")
 		if not world_changes.has("plan_support"):
 			world_changes.append("plan_support")
+	if alignment_relation == "prerequisite_progress" and not world_changes.has("prerequisite_progress"):
+		world_changes.append("prerequisite_progress")
+	elif alignment_relation == "safety_substitution" and not world_changes.has("safety_substitution"):
+		world_changes.append("safety_substitution")
+	elif alignment_relation == "blocked" and not world_changes.has("plan_blocked"):
+		world_changes.append("plan_blocked")
 	var plan_alignment := "mismatch" if plan_body_mismatch else "supporting" if plan_support else "aligned" if planned_action != "" else "unknown"
 	var immediate_risk := _scribe_immediate_risk(nearest_danger_type, nearest_danger_distance, recent_damage, plan_alignment)
 	var risk_reason := _scribe_risk_reason(nearest_danger_type, nearest_danger_distance, recent_damage, plan_alignment)
@@ -1771,7 +1795,8 @@ func _scribe_action_categories(action_id: String) -> Array[String]:
 
 
 func _local_stub_library_reflection(payload: Dictionary) -> Dictionary:
-	if _payload_mentions_text(payload, "plan_support") and (_payload_mentions_text(payload, "repair_structure") or _payload_mentions_text(payload, "use_tower")):
+	var mentions_flying := _payload_mentions_any_text(payload, ["flying", "wings", "winged"])
+	if not mentions_flying and _payload_mentions_text(payload, "plan_support") and (_payload_mentions_text(payload, "repair_structure") or _payload_mentions_text(payload, "use_tower")):
 		return {
 			"schema": "ari.night_reflection.v1",
 			"title": "Ari's rough local reflection",
@@ -1826,7 +1851,7 @@ func _local_stub_library_reflection(payload: Dictionary) -> Dictionary:
 			"source": "local_fallback",
 			"failure_reason": "local_fallback",
 		}
-	if _payload_mentions_text(payload, "plan_body_mismatch") and _payload_mentions_text(payload, "fight_head_on"):
+	if not mentions_flying and _payload_mentions_text(payload, "plan_body_mismatch") and _payload_mentions_text(payload, "fight_head_on"):
 		return {
 			"schema": "ari.night_reflection.v1",
 			"title": "Ari's rough local reflection",
@@ -1881,7 +1906,7 @@ func _local_stub_library_reflection(payload: Dictionary) -> Dictionary:
 			"source": "local_fallback",
 			"failure_reason": "local_fallback",
 		}
-	if _payload_mentions_any_text(payload, ["flying", "wings", "winged"]):
+	if mentions_flying:
 		return {
 			"schema": "ari.night_reflection.v1",
 			"title": "Ari's rough local reflection",

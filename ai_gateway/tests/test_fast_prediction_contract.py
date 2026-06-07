@@ -189,6 +189,33 @@ def test_fast_prediction_prompt_includes_rolling_summary():
     assert len(prompt) < 1200
 
 
+def test_fast_prediction_prompt_includes_compact_nested_understanding():
+    payload = _prediction_payload()
+    payload["strategy_packet"]["understanding"] = {
+        "schema": "ari.understanding.v1",
+        "survival_question": "How can Ari answer the sky before wings reach him?",
+        "intended_strategy": "Build a Storm Rod before extra walls.",
+        "prerequisite_ladder": [
+            {"action_id": "mine_stone", "status": "needed", "reason": "Need stone."},
+            {"action_id": "build_storm_rod", "status": "blocked", "reason": "Needs stone."},
+        ],
+        "body_alignment": {
+            "relation": "prerequisite_progress",
+            "planned_action": "build_storm_rod",
+            "body_job": "mine_stone",
+        },
+    }
+
+    prompt = prediction_user_prompt(PredictionRequest(**payload))
+
+    assert "understanding=" in prompt
+    assert "answer the sky" in prompt
+    assert "mine_stone" in prompt
+    assert "build_storm_rod" in prompt
+    assert "prerequisite_progress" in prompt
+    assert len(prompt) < 1250
+
+
 def _prediction_payload():
     return {
         "schema": "ari.prediction.request.v1",

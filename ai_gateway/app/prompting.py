@@ -159,6 +159,7 @@ def agent_plan_user_prompt(request: AgentPlanRequest) -> str:
                 "avoid": strategy.get("avoid_repeating", []),
                 "try": strategy.get("try_next", []),
             }, 520),
+            "understanding=%s" % _compact_json(_compact_understanding(strategy.get("understanding", {})), 420),
             "panel=%s" % _compact_json(_compact_action_control_panel(request.action_control_panel, 12), 950),
             "doctrine_plan=%s doctrines=%s" % (_compact_json(request.active_doctrine_plan[:4], 360), _compact_json(request.active_doctrines[:3], 360)),
             "recent=%s current=%s" % (_compact_json(request.recent_outcomes[:4], 320), _compact_json(request.current_plan, 280)),
@@ -240,31 +241,33 @@ def prediction_user_prompt(request: PredictionRequest) -> str:
     strategy = request.strategy_packet if isinstance(request.strategy_packet, dict) else {}
     hints = strategy.get("priority_hints", {}) if isinstance(strategy, dict) else {}
     lessons = strategy.get("current_lessons", []) if isinstance(strategy, dict) else []
+    understanding = _compact_understanding(strategy.get("understanding", {})) if isinstance(strategy, dict) else {}
     rolling = _compact_rolling_summary(request.rolling_summary)
-    return "\n".join(
-        [
-            "ctx=%s phase=%s t=%.0f hp=%s action=%s"
-            % (
-                request.context_hash[:80],
-                request.phase[:16],
-                request.time_left,
-                str(request.ari.get("hp", ""))[:12] if isinstance(request.ari, dict) else "",
-                str(request.ari.get("current_action", ""))[:60] if isinstance(request.ari, dict) else "",
-            ),
-            "risk=%s threats=%s blockers=%s mismatch=%s"
-            % (
-                str(rolling.get("risk", ""))[:40],
-                ",".join(rolling.get("threats", [])) if isinstance(rolling.get("threats", []), list) else "",
-                ",".join(rolling.get("blockers", [])) if isinstance(rolling.get("blockers", []), list) else "",
-                ";".join(rolling.get("mismatch", []))[:180] if isinstance(rolling.get("mismatch", []), list) else "",
-            ),
-            "risks=%s res=%s plan=%s" % (_compact_json(risks, 180), _compact_json(request.resources, 120), _compact_json(request.current_plan, 140)),
-            "hints=%s lessons=%s" % (_compact_json(hints, 160), _compact_json(_slice_list(lessons, 2), 160)),
-            "panel=%s" % _prediction_action_panel_text(request.action_control_panel, 8),
-            "legal=%s" % (",".join(legal_available[:16]) or "none"),
-            'example={"r":"high","a":"build_storm_rod","u":0.8,"h":{"build_storm_rod":0.8},"c":0.6}',
-        ]
-    )
+    lines = [
+        "ctx=%s phase=%s t=%.0f hp=%s action=%s"
+        % (
+            request.context_hash[:80],
+            request.phase[:16],
+            request.time_left,
+            str(request.ari.get("hp", ""))[:12] if isinstance(request.ari, dict) else "",
+            str(request.ari.get("current_action", ""))[:60] if isinstance(request.ari, dict) else "",
+        ),
+        "risk=%s threats=%s blockers=%s mismatch=%s"
+        % (
+            str(rolling.get("risk", ""))[:40],
+            ",".join(rolling.get("threats", [])) if isinstance(rolling.get("threats", []), list) else "",
+            ",".join(rolling.get("blockers", [])) if isinstance(rolling.get("blockers", []), list) else "",
+            ";".join(rolling.get("mismatch", []))[:180] if isinstance(rolling.get("mismatch", []), list) else "",
+        ),
+        "risks=%s res=%s plan=%s" % (_compact_json(risks, 180), _compact_json(request.resources, 120), _compact_json(request.current_plan, 140)),
+        "hints=%s lessons=%s" % (_compact_json(hints, 160), _compact_json(_slice_list(lessons, 2), 160)),
+        "panel=%s" % _prediction_action_panel_text(request.action_control_panel, 8),
+        "legal=%s" % (",".join(legal_available[:16]) or "none"),
+        'example={"r":"high","a":"build_storm_rod","u":0.8,"h":{"build_storm_rod":0.8},"c":0.6}',
+    ]
+    if understanding:
+        lines.insert(4, "understanding=%s" % _compact_json(understanding, 260))
+    return "\n".join(lines)
 
 
 def _compact_day_summary(summary: object) -> dict[str, object]:
@@ -477,6 +480,37 @@ def _compact_rolling_summary(summary: object) -> dict[str, object]:
     if isinstance(hints, dict):
         compact["hints"] = {str(key)[:60]: hints[key] for key in list(hints.keys())[:5]}
     return {key: value for key, value in compact.items() if value not in ("", [], {})}
+
+
+def _compact_understanding(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or value.get("schema") != "ari.understanding.v1":
+        return {}
+    ladder: list[str] = []
+    raw_ladder = value.get("prerequisite_ladder", [])
+    if isinstance(raw_ladder, list):
+        for raw in raw_ladder[:4]:
+            if not isinstance(raw, dict):
+                continue
+            action_id = str(raw.get("action_id", raw.get("id", "")))[:60]
+            status = str(raw.get("status", ""))[:32]
+            if action_id:
+                ladder.append("%s:%s" % (action_id, status) if status else action_id)
+    body_alignment = value.get("body_alignment", {})
+    align = ""
+    if isinstance(body_alignment, dict):
+        relation = str(body_alignment.get("relation", ""))[:40]
+        body_job = str(body_alignment.get("body_job", body_alignment.get("body_action", "")))[:60]
+        planned = str(body_alignment.get("planned_action", ""))[:60]
+        if relation:
+            align = "%s:%s>%s" % (relation, body_job, planned)
+    compact: dict[str, object] = {
+        "q": str(value.get("survival_question", ""))[:110],
+        "thesis": str(value.get("sign_thesis", ""))[:110],
+        "strategy": str(value.get("intended_strategy", ""))[:110],
+        "ladder": ladder,
+        "align": align,
+    }
+    return {key: item for key, item in compact.items() if item not in ("", [], {})}
 
 
 def _compact_agent_fallback(value: object) -> dict[str, object]:

@@ -34,10 +34,13 @@ func update_state(state: Dictionary) -> void:
 	var survival_theory := str(state.get("ai_survival_theory", "")).strip_edges()
 	var top_plan := str(state.get("ai_top_grounded_plan", "")).strip_edges()
 	var top_hint := str(state.get("ai_top_hint", "")).strip_edges()
+	var understanding_line := str(state.get("ari_understanding_line", "")).strip_edges()
 	var ai_status := str(state.get("ai_status", "AI disabled")).strip_edges()
 	var sign_strength := clampf(float(state.get("sign_strength", 0.0)), 0.0, 1.0)
 	var resonance := clampf(float(state.get("sign_resonance", 0.0)), 0.0, 1.0)
-	var plan_text := top_plan if top_plan != "" else _plan_text_from_hint(top_hint)
+	var plan_text := understanding_line
+	if plan_text == "":
+		plan_text = top_plan if top_plan != "" else _plan_text_from_hint(top_hint)
 	if plan_text == "":
 		plan_text = "watch and survive"
 	if ai_status == "":

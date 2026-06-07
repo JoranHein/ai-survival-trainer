@@ -59,6 +59,8 @@ func _run() -> void:
 	await _test_night_agent_eat_food_plan_executes()
 	await _test_agent_planner_withholds_eat_food_during_active_danger()
 	await _test_world_agent_plan_state_contract()
+	await _test_ari_understanding_packet_contract()
+	await _test_body_alignment_prerequisite_progress_contract()
 	await _test_agent_plan_outcomes_feed_next_observation()
 	await _test_agent_plan_out_of_order_completion_does_not_skip_prerequisite()
 	await _test_reflection_doctrine_overrides_unsafe_local_sign_fallback()
@@ -1101,6 +1103,113 @@ func _test_world_agent_plan_state_contract() -> void:
 	var plan_event := _find_dictionary_by_value(plan_events, "type", "agent_plan_created")
 	_assert(str(plan_event.get("action_id", "")) == "build_tower", "agent plan telemetry should record chosen action")
 	_assert(str(plan_event.get("reason", "")).contains("Build height"), "agent plan telemetry should record chosen reason")
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
+
+
+func _test_ari_understanding_packet_contract() -> void:
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should load for Ari understanding checks")
+	if world_scene == null:
+		return
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	var bridge: AIBridge = world.get("ai_bridge")
+	if bridge != null:
+		bridge.force_provider_mode("local_stub")
+
+	world.call("commit_sign", "build high when wings come")
+	if world.has_method("_refresh_ari_understanding"):
+		world.call("_refresh_ari_understanding", "test")
+	else:
+		_assert(false, "World should expose a deterministic Ari understanding refresh")
+
+	var understanding = world.get("ari_understanding")
+	_assert(typeof(understanding) == TYPE_DICTIONARY, "World should store Ari understanding as a dictionary")
+	var packet: Dictionary = understanding if typeof(understanding) == TYPE_DICTIONARY else {}
+	_assert(packet.get("schema", "") == "ari.understanding.v1", "Ari understanding packet should carry schema")
+	_assert(str(packet.get("sign_thesis", "")).to_lower().contains("sky") or str(packet.get("sign_thesis", "")).to_lower().contains("wing"), "Ari understanding should preserve the private sky-danger thesis")
+	_assert(_array_has_dictionary_value(packet.get("legal_answers", []), "action_id", "build_storm_rod"), "Ari understanding should list validated Storm Rod as a legal answer")
+	_assert(_array_has_dictionary_value(packet.get("prerequisite_ladder", []), "action_id", "build_storm_rod"), "Ari understanding should include Storm Rod in the prerequisite ladder")
+	_assert(str(packet.get("display_line", "")).strip_edges().length() > 0, "Ari understanding should include a compact HUD/display line")
+	_assert(str(packet.get("display_line", "")).length() <= 120, "Ari understanding display line should stay compact")
+
+	var strategy: Dictionary = world.call("_build_strategy_packet", "test")
+	_assert(strategy.get("understanding", {}).get("schema", "") == "ari.understanding.v1", "strategy packet should carry compact Ari understanding")
+	var plan_payload: Dictionary = world.call("_build_agent_plan_payload", "sign_commit")
+	_assert(plan_payload.get("strategy_packet", {}).get("understanding", {}).get("schema", "") == "ari.understanding.v1", "planner payload should thread Ari understanding through strategy_packet")
+	var prediction_payload: Dictionary = world.call("_build_fast_prediction_payload")
+	_assert(prediction_payload.get("strategy_packet", {}).get("understanding", {}).get("schema", "") == "ari.understanding.v1", "prediction payload should thread Ari understanding through strategy_packet")
+	var snapshot: Dictionary = world.call("_build_observer_snapshot", "timer", 0.2, [])
+	_assert(snapshot.get("understanding", {}).get("schema", "") == "ari.understanding.v1", "observer snapshots should preserve Ari understanding")
+	var context: Dictionary = world.call("_get_ari_mind_context")
+	_assert(context.get("understanding", {}).get("schema", "") == "ari.understanding.v1", "AriMind context should receive compact Ari understanding")
+
+	var seen_state := {"state": {}}
+	world.state_changed.connect(func(state: Dictionary) -> void:
+		seen_state["state"] = state
+	)
+	world.call("_emit_state")
+	await process_frame
+	var emitted = seen_state.get("state", {})
+	if typeof(emitted) == TYPE_DICTIONARY:
+		_assert(emitted.get("ari_understanding", {}).get("schema", "") == "ari.understanding.v1", "World state should expose Ari understanding for UI")
+		_assert(str(emitted.get("ari_understanding_line", "")).strip_edges().length() > 0, "World state should expose compact Ari understanding line")
+
+	root.remove_child(world)
+	world.queue_free()
+	await process_frame
+
+
+func _test_body_alignment_prerequisite_progress_contract() -> void:
+	var world_scene = load("res://scenes/world/World.tscn")
+	_assert(world_scene != null, "World scene should load for body alignment checks")
+	if world_scene == null:
+		return
+	var world: World = world_scene.instantiate()
+	root.add_child(world)
+	await process_frame
+	var bridge: AIBridge = world.get("ai_bridge")
+	if bridge != null:
+		bridge.force_provider_mode("local_stub")
+	world.call("commit_sign", "build high when wings come")
+	var resource_system = world.get("resource_system")
+	if resource_system != null:
+		resource_system.call("spend", {"stone": int(resource_system.call("get_stone"))})
+	var request_id := int(world.get("_agent_plan_request_id"))
+	world.call("_on_agent_plan_response", request_id, {
+		"ok": true,
+		"schema": "ari.agent.plan.v1",
+		"goal": "answer the sky before wings reach Ari",
+		"survival_theory": "A Storm Rod answers flying enemies.",
+		"plan": [{
+			"step_id": "storm_first",
+			"action_id": "build_storm_rod",
+			"reason": "The sign warns about wings.",
+			"success": "storm_rod_count > 0",
+		}],
+		"next_action": {"action_id": "build_storm_rod", "urgency": 0.95, "reason": "Build anti-flying defense."},
+		"fallback_action": {"action_id": "use_cover", "urgency": 0.4},
+		"belief_updates": [],
+		"thought": "Wings need a sky answer.",
+		"confidence": 0.85,
+		"replan_after_seconds": 9.0,
+	})
+	_assert(world.has_method("_build_body_alignment_trace"), "World should expose deterministic body alignment tracing")
+	var trace: Dictionary = world.call("_build_body_alignment_trace", {
+		"job": "mine_stone",
+		"reason": "Need stone before a Storm Rod can be built.",
+	}, world.call("_get_ari_mind_context")) if world.has_method("_build_body_alignment_trace") else {}
+	_assert(trace.get("relation", "") == "prerequisite_progress", "mining stone for a blocked Storm Rod should be prerequisite progress, not drift")
+	_assert(trace.get("planned_action", "") == "build_storm_rod", "body alignment should preserve the planned action")
+	_assert(trace.get("body_job", "") == "mine_stone", "body alignment should preserve Ari's actual job")
+	if world.has_method("_refresh_ari_understanding"):
+		world.call("_refresh_ari_understanding", "body_alignment_test")
+	var packet: Dictionary = world.get("ari_understanding") if typeof(world.get("ari_understanding")) == TYPE_DICTIONARY else {}
+	_assert(packet.get("body_alignment", {}).get("relation", "") == "prerequisite_progress", "Ari understanding should carry the latest body alignment trace")
+
 	root.remove_child(world)
 	world.queue_free()
 	await process_frame

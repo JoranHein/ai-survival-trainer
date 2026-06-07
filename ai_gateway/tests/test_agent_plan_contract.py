@@ -216,6 +216,39 @@ def test_agent_plan_prompt_includes_compact_action_control_panel():
     assert "enables" in prompt
 
 
+def test_agent_plan_prompt_includes_compact_nested_understanding():
+    payload = _plan_payload()
+    payload["strategy_packet"] = {
+        "schema": "ari.strategy_packet.v1",
+        "main_risks": ["flying"],
+        "priority_hints": {"build_storm_rod": 0.85, "mine_stone": 0.55},
+        "understanding": {
+            "schema": "ari.understanding.v1",
+            "sign_thesis": "Ari reads the sign as sky danger, not just a tall wall.",
+            "survival_question": "How can Ari answer the sky before wings reach him?",
+            "intended_strategy": "Build a Storm Rod, then use height.",
+            "prerequisite_ladder": [
+                {"action_id": "mine_stone", "status": "needed", "reason": "Need stone."},
+                {"action_id": "build_storm_rod", "status": "blocked", "reason": "Needs stone."},
+            ],
+            "body_alignment": {
+                "relation": "prerequisite_progress",
+                "planned_action": "build_storm_rod",
+                "body_job": "mine_stone",
+            },
+        },
+    }
+
+    prompt = agent_plan_user_prompt(AgentPlanRequest(**payload))
+
+    assert "understanding=" in prompt
+    assert "answer the sky" in prompt
+    assert "mine_stone" in prompt
+    assert "build_storm_rod" in prompt
+    assert "prerequisite_progress" in prompt
+    assert len(prompt) < 2700
+
+
 def test_agent_plan_prompt_compacts_local_fallback_without_thought_prose():
     payload = _plan_payload()
     payload["local_fallback"]["thought"] = "I can still choose a legal fallback."

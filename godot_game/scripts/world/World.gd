@@ -34,6 +34,7 @@ const BACKGROUND_AI_INTERVAL := 10.0
 const BACKGROUND_AI_RESULT_CAP := 8
 const ACTION_CONTROL_PANEL_DEFAULT_CAP := 24
 const ACTION_CONTROL_PANEL_FAST_CAP := 14
+const ARI_UNDERSTANDING_SCHEMA := "ari.understanding.v1"
 const AGENT_NONEXECUTABLE_ACTION_IDS := {
 	"anti_flying": true,
 	"anti_air_defense": true,
@@ -128,6 +129,7 @@ var ari_rulebook := AriRulebookScript.new()
 var ari_perception := AriPerceptionScript.new()
 var agent_plan := {}
 var agent_grounded_plan: Array = []
+var ari_understanding := {}
 var latest_lesson_title := ""
 var _visual_review_staging := false
 var _ari_intent_active := false
@@ -170,6 +172,7 @@ var _background_ai_request_in_flight := false
 var _background_ai_request_id := 0
 var _background_ai_active_context_hash := ""
 var _background_ai_results: Array = []
+var _latest_body_alignment := {}
 var _night_reflection_request_in_flight := false
 var _night_reflection_requested := {}
 var _logged_day_summary_ids := {}
@@ -346,6 +349,8 @@ func start_run() -> void:
 	_background_ai_request_id = 0
 	_background_ai_active_context_hash = ""
 	_background_ai_results.clear()
+	_latest_body_alignment = {}
+	ari_understanding = {}
 	_night_reflection_request_in_flight = false
 	_night_reflection_requested.clear()
 	_logged_day_summary_ids.clear()
@@ -382,6 +387,7 @@ func start_run() -> void:
 		permanent_progression.call("reset_run")
 	run_build.call("reset_run")
 	_reinterpret_current_sign()
+	_refresh_ari_understanding("restart")
 	selected_build_type = WALL_BUILD_ID
 	day_night.restart()
 	wave_director.restart()
@@ -416,6 +422,7 @@ func restart_run() -> void:
 func commit_sign(text: String) -> void:
 	sign_text = text.strip_edges()
 	_reinterpret_current_sign()
+	_refresh_ari_understanding("sign_commit")
 	_set_status_message("Ari read the sign.", 1.4)
 	_show_sign_interpretation_thought(true)
 	_emit_state()
@@ -432,6 +439,7 @@ func select_run_build_preset(preset_number: int, show_feedback := true) -> void:
 		return
 	_apply_run_build_to_ari()
 	_reinterpret_current_sign()
+	_refresh_ari_understanding("run_build_changed")
 	if show_feedback:
 		_set_status_message("Run build: %s" % str(run_build.call("get_preset_name")), 1.8)
 		_show_ari_thought(str(run_build.call("get_preset_thought")), true)
@@ -1164,6 +1172,9 @@ func _emit_state() -> void:
 		"sign_grounded_plan": sign_grounded_plan,
 		"agent_plan": agent_plan,
 		"agent_grounded_plan": agent_grounded_plan,
+		"ari_understanding": _compact_ari_understanding(ari_understanding, 4),
+		"ari_understanding_line": _limit_inline(str(ari_understanding.get("display_line", "")), 120),
+		"body_alignment": _compact_body_alignment(_latest_body_alignment),
 		"sign_action_focus": _get_sign_action_focus(ari_job, ari_job_reason),
 		"ai_status": ai_status,
 		"ai_survival_theory": ai_survival_theory,
@@ -1589,6 +1600,7 @@ func _has_urgent_prediction_risk() -> bool:
 
 
 func _build_observer_snapshot(trigger: String, salience := 0.0, notable_changes: Array = []) -> Dictionary:
+	_refresh_ari_understanding(trigger)
 	var ari_job := str(ari.call("get_current_job")) if ari != null and ari.has_method("get_current_job") else "wait_or_idle"
 	var ari_action := str(ari.call("get_current_action")) if ari != null and ari.has_method("get_current_action") else "idle"
 	var ari_reason := str(ari.call("get_job_reason")) if ari != null and ari.has_method("get_job_reason") else "Waiting"
@@ -1631,6 +1643,8 @@ func _build_observer_snapshot(trigger: String, salience := 0.0, notable_changes:
 			"age_seconds": maxf(_agent_plan_clock - float(agent_plan.get("created_at_seconds", _agent_plan_clock)), 0.0) if not agent_plan.is_empty() else 0.0,
 			"recent_outcomes": _observer_recent_outcome_labels(6),
 		},
+		"understanding": _compact_ari_understanding(ari_understanding, 4),
+		"body_alignment": _compact_body_alignment(_latest_body_alignment),
 		"world": {
 			"resources": {"food": _food_count(), "stone": _stone_count(), "ore": _ore_count()},
 			"run_build": _observer_run_build_summary(),
@@ -1676,12 +1690,15 @@ func _try_request_scribe_note() -> void:
 
 
 func _build_scribe_context() -> Dictionary:
+	_refresh_ari_understanding("scribe")
 	return {
 		"schema": "ari.scribe.request.v1",
 		"day": day_night.day,
 		"phase": day_night.phase,
 		"current_sign": sign_text,
 		"active_plan": _agent_current_plan_payload(),
+		"understanding": _compact_ari_understanding(ari_understanding, 4),
+		"body_alignment": _compact_body_alignment(_latest_body_alignment),
 		"snapshots": ari_memory.get_recent_snapshots(10),
 		"max_words": 35,
 	}
@@ -1713,6 +1730,7 @@ func _should_spend_smart_reflection(trigger: String, outcome: String) -> bool:
 
 
 func _build_night_reflection_payload(trigger: String, outcome: String) -> Dictionary:
+	_refresh_ari_understanding(trigger)
 	var doctrine_context := _doctrine_context()
 	var day_summary := _build_day_summary(trigger, outcome)
 	_log_day_summary(day_summary)
@@ -1729,6 +1747,8 @@ func _build_night_reflection_payload(trigger: String, outcome: String) -> Dictio
 			"grounded_plan": sign_grounded_plan,
 			"resonance": sign_resonance,
 		},
+		"understanding": _compact_ari_understanding(ari_understanding, 4),
+		"body_alignment": _compact_body_alignment(_latest_body_alignment),
 		"day_summary": day_summary,
 		"snapshots": _reflection_snapshot_selection(NIGHT_REFLECTION_SNAPSHOT_CAP),
 		"recent_events": ari_memory.get_recent_events(NIGHT_REFLECTION_EVENT_CAP),
@@ -1760,12 +1780,15 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 	var went_wrong: Array[String] = []
 	var misunderstood: Array[String] = []
 	var plan_mismatches: Array[String] = []
+	var prerequisite_progress: Array[String] = []
+	var safety_substitutions: Array[String] = []
 	var resource_blockers: Array[String] = []
 	var threats: Array[String] = []
 	var candidate_lessons: Array[String] = []
 	var recommended_priority_hints: Array[String] = []
 	var evidence_snapshot_ids: Array[String] = []
 	var alignment_counts := {"aligned": 0, "supporting": 0, "mismatch": 0, "unknown": 0}
+	var current_understanding := _compact_ari_understanding(ari_understanding, 3)
 
 	for snapshot in snapshots:
 		if typeof(snapshot) != TYPE_DICTIONARY:
@@ -1773,6 +1796,22 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 		var snapshot_id := str(snapshot.get("snapshot_id", "")).strip_edges()
 		if snapshot_id != "":
 			_summary_append(evidence_snapshot_ids, snapshot_id, 12)
+		var snapshot_understanding = snapshot.get("understanding", {})
+		if current_understanding.is_empty() and typeof(snapshot_understanding) == TYPE_DICTIONARY and str(snapshot_understanding.get("schema", "")) == ARI_UNDERSTANDING_SCHEMA:
+			current_understanding = _compact_ari_understanding(snapshot_understanding, 3)
+		var body_alignment = snapshot.get("body_alignment", {})
+		if typeof(body_alignment) == TYPE_DICTIONARY:
+			var relation := str(body_alignment.get("relation", "")).strip_edges()
+			var alignment_line := _body_alignment_summary_line(body_alignment)
+			if relation == "prerequisite_progress":
+				_summary_append(prerequisite_progress, alignment_line, 8)
+				_summary_append(worked, alignment_line, 8)
+			elif relation == "safety_substitution":
+				_summary_append(safety_substitutions, alignment_line, 8)
+				_summary_append(worked, alignment_line, 8)
+			elif relation == "mismatch":
+				_summary_append(plan_mismatches, alignment_line, 8)
+				_summary_append(misunderstood, "Ari's body did not match the active plan.", 8)
 		var world_state = snapshot.get("world", {})
 		if typeof(world_state) != TYPE_DICTIONARY:
 			continue
@@ -1835,6 +1874,10 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 					_summary_append(threats, danger_name, 8)
 		for change in _summary_string_array(note.get("world_changes", []), 6, 80):
 			_summary_append(what_changed, change, 10)
+			if change == "prerequisite_progress":
+				_summary_append(prerequisite_progress, note_text if note_text != "" else "Ari made prerequisite progress toward the active plan.", 8)
+			elif change == "safety_substitution":
+				_summary_append(safety_substitutions, note_text if note_text != "" else "Ari chose a safer substitute under pressure.", 8)
 		for blocker in _summary_string_array(note.get("resource_blockers", []), 5, 80):
 			_summary_append(resource_blockers, blocker, 8)
 		for mistake in _summary_string_array(note.get("mistake_candidates", []), 5, 140):
@@ -1887,10 +1930,13 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 		"misunderstood": misunderstood,
 		"plan_alignment": alignment_counts,
 		"plan_mismatches": plan_mismatches,
+		"prerequisite_progress": prerequisite_progress,
+		"safety_substitutions": safety_substitutions,
 		"resource_blockers": resource_blockers,
 		"threats": threats,
 		"candidate_lessons": candidate_lessons,
 		"recommended_priority_hints": recommended_priority_hints,
+		"current_understanding": current_understanding,
 		"evidence_snapshot_ids": evidence_snapshot_ids,
 		"evidence_ids": evidence_snapshot_ids,
 	}
@@ -2103,6 +2149,9 @@ func _build_strategy_packet(trigger: String = "") -> Dictionary:
 		"priority_hints": priority_hints,
 		"avoid_repeating": avoid_repeating,
 		"try_next": try_next,
+		"prerequisite_progress": summary.get("prerequisite_progress", []),
+		"safety_substitutions": summary.get("safety_substitutions", []),
+		"understanding": _compact_ari_understanding(ari_understanding, 4),
 		"evidence": _strategy_evidence(summary.get("evidence_snapshot_ids", []), background_notes, 14),
 		"evidence_ids": strategy_evidence_ids,
 		"confidence": 0.55 if not summary.get("candidate_lessons", []).is_empty() else 0.35,
@@ -2123,6 +2172,9 @@ func _build_agent_plan_strategy_packet(trigger: String = "") -> Dictionary:
 		"priority_hints": _compact_priority_map(strategy.get("priority_hints", {}), 8),
 		"avoid_repeating": _summary_string_array(strategy.get("avoid_repeating", []), 4, 100),
 		"try_next": _summary_string_array(strategy.get("try_next", []), 5, 80),
+		"prerequisite_progress": _summary_string_array(strategy.get("prerequisite_progress", []), 3, 100),
+		"safety_substitutions": _summary_string_array(strategy.get("safety_substitutions", []), 2, 100),
+		"understanding": _compact_ari_understanding(strategy.get("understanding", {}), 3),
 		"evidence": _summary_string_array(strategy.get("evidence", []), 4, 80),
 		"evidence_ids": _summary_string_array(strategy.get("evidence_ids", []), 4, 80),
 		"confidence": clampf(float(strategy.get("confidence", 0.35)), 0.0, 1.0),
@@ -2209,6 +2261,7 @@ func _should_hold_fast_prediction_for_due_agent_plan() -> bool:
 
 
 func _build_fast_prediction_payload() -> Dictionary:
+	_refresh_ari_understanding("fast_prediction")
 	var nearest := _observer_nearest_danger()
 	var risks := _prediction_risks(nearest)
 	var rolling_summary := _build_rolling_tactical_summary("fast_prediction")
@@ -2272,19 +2325,17 @@ func _build_prediction_strategy_packet(rolling_summary: Dictionary) -> Dictionar
 		priority_hints[hint_id] = maxf(float(priority_hints.get(hint_id, 0.0)), clampf(float(rolling_summary.get("priority_hints", {}).get(key, 0.0)), 0.0, 1.0))
 	var packet := {
 		"schema": "ari.strategy_packet.v1",
-		"summary_id": str(strategy.get("summary_id", "")),
-		"day": day_night.day,
-		"source": str(strategy.get("source", "deterministic")),
-		"origin": str(strategy.get("origin", "strategy_packet")),
 		"main_risks": _summary_string_array(strategy.get("main_risks", rolling_summary.get("threats", [])), 4, 50),
-		"current_lessons": _summary_string_array(strategy.get("current_lessons", rolling_summary.get("lesson_candidates", [])), 2, 80),
+		"current_lessons": _summary_string_array(strategy.get("current_lessons", rolling_summary.get("lesson_candidates", [])), 1, 70),
 		"priority_hints": _compact_priority_map(priority_hints, 6),
-		"avoid_repeating": _summary_string_array(strategy.get("avoid_repeating", []), 2, 80),
-		"try_next": _summary_string_array(strategy.get("try_next", []), 4, 80),
-		"evidence": _summary_string_array(strategy.get("evidence", []), 3, 60),
-		"evidence_ids": _summary_string_array(strategy.get("evidence_ids", []), 1, 80),
-		"confidence": clampf(float(strategy.get("confidence", 0.35)), 0.0, 1.0),
+		"understanding": _compact_ari_understanding_for_prediction(strategy.get("understanding", {})),
 	}
+	var prerequisite_progress := _summary_string_array(strategy.get("prerequisite_progress", []), 2, 90)
+	if not prerequisite_progress.is_empty():
+		packet["prerequisite_progress"] = prerequisite_progress
+	var safety_substitutions := _summary_string_array(strategy.get("safety_substitutions", []), 1, 90)
+	if not safety_substitutions.is_empty():
+		packet["safety_substitutions"] = safety_substitutions
 	var failure_reason := str(strategy.get("failure_reason", "")).strip_edges()
 	if failure_reason != "":
 		packet["failure_reason"] = failure_reason
@@ -2942,7 +2993,9 @@ func _advance_ari_daytime(delta: float) -> void:
 		ari.call("advance_mining_job", delta, true, "Debug mining")
 		return
 
-	var decision: Dictionary = ari_mind.call("choose_daytime_job", _get_ari_mind_context())
+	var mind_context := _get_ari_mind_context()
+	var decision: Dictionary = ari_mind.call("choose_daytime_job", mind_context)
+	_latest_body_alignment = _build_body_alignment_trace(decision, mind_context)
 	var job := str(decision.get("job", "wait_or_idle"))
 	var reason := str(decision.get("reason", "Waiting"))
 	match job:
@@ -3029,7 +3082,9 @@ func _advance_ari_daytime(delta: float) -> void:
 
 
 func _advance_ari_night_tactic(delta: float) -> void:
-	var decision: Dictionary = ari_mind.call("choose_night_tactic", _get_night_tactic_context())
+	var tactic_context := _get_night_tactic_context()
+	var decision: Dictionary = ari_mind.call("choose_night_tactic", tactic_context)
+	_latest_body_alignment = _build_body_alignment_trace(decision, tactic_context)
 	var job := str(decision.get("job", "wait_or_idle"))
 	var reason := str(decision.get("reason", "Night has started"))
 	if enemies.is_empty() and job == "wait_or_idle":
@@ -3388,6 +3443,8 @@ func _get_ari_mind_context() -> Dictionary:
 		"priority_hints": sign_priority_hints,
 		"grounded_plan": sign_grounded_plan,
 		"agent_grounded_plan": _active_agent_grounded_plan(),
+		"understanding": _compact_ari_understanding(ari_understanding, 3),
+		"body_alignment": _compact_body_alignment(_latest_body_alignment),
 		"run_build": _get_run_build_context(),
 		"current_job": str(ari.call("get_current_job")) if ari != null else "wait_or_idle",
 	}
@@ -4891,6 +4948,7 @@ func _on_agent_plan_response(request_id: int, result: Dictionary) -> void:
 	agent_plan["stale_reason"] = ""
 	_refresh_agent_plan_context_signatures()
 	agent_grounded_plan = _agent_plan_to_grounded_plan(result)
+	_refresh_ari_understanding(response_trigger)
 	_record_agent_plan_created(response_trigger, result)
 	_agent_plan_replan_at = _agent_plan_clock + clampf(float(result.get("replan_after_seconds", 8.0)), 3.0, 45.0)
 	var source := str(result.get("source", ""))
@@ -5033,6 +5091,8 @@ func _recent_scribe_note_ids_for_evidence(evidence_ids: Array, max_count: int) -
 func _clear_agent_plan() -> void:
 	agent_plan = {}
 	agent_grounded_plan = []
+	_latest_body_alignment = {}
+	_refresh_ari_understanding("plan_cleared")
 	_agent_plan_replan_at = 0.0
 	_agent_plan_timer_signature = ""
 	_agent_plan_phase_signature = ""
@@ -5055,6 +5115,7 @@ func _seed_local_agent_plan(trigger: String) -> void:
 	agent_plan["stale_reason"] = ""
 	_refresh_agent_plan_context_signatures()
 	agent_grounded_plan = _agent_plan_to_grounded_plan(agent_plan)
+	_refresh_ari_understanding(trigger)
 	_record_agent_plan_created(trigger, agent_plan)
 	_agent_plan_replan_at = _agent_plan_clock + clampf(float(agent_plan.get("replan_after_seconds", 8.0)), 3.0, 45.0)
 	_emit_state()
@@ -5628,6 +5689,7 @@ func _is_critical_agent_plan_trigger(trigger: String) -> bool:
 
 
 func _build_agent_plan_payload(trigger: String) -> Dictionary:
+	_refresh_ari_understanding(trigger)
 	var ari_job := str(ari.call("get_current_job")) if ari != null else "wait_or_idle"
 	var ari_job_reason := str(ari.call("get_job_reason")) if ari != null else "Waiting"
 	var doctrine_context := _doctrine_context()
@@ -6090,6 +6152,7 @@ func _on_ai_deep_interpretation_response(request_id: int, result: Dictionary) ->
 	sign_resonance = clampf(float(result.get("resonance", sign_resonance)), 0.0, 1.0)
 	ai_survival_theory = str(result.get("survival_theory", "")).strip_edges()
 	ai_emotion = str(result.get("emotion", "")).strip_edges()
+	_refresh_ari_understanding("deep_interpretation")
 	var used_cache := bool(result.get("cached", false)) or str(result.get("source", "")) == "cache"
 	ai_status = "AI: cached" if used_cache else "AI: active"
 	var thought := "I remember this sign." if used_cache else str(result.get("thought", "")).strip_edges()
@@ -6376,6 +6439,515 @@ func _compact_doctrine_plan(value, max_count: int) -> Array:
 		if result.size() >= max_count:
 			break
 	return result
+
+
+func _refresh_ari_understanding(trigger: String = "") -> void:
+	ari_understanding = _build_ari_understanding_packet(trigger)
+
+
+func _build_ari_understanding_packet(trigger: String = "") -> Dictionary:
+	var sky_danger := _understanding_mentions_sky_danger()
+	var intended_action := _understanding_intended_action(sky_danger)
+	var prerequisite_ladder := _build_understanding_prerequisite_ladder(intended_action, sky_danger)
+	var legal_answers := _build_understanding_legal_answers(prerequisite_ladder, sky_danger)
+	var active_doctrines := _learned_active_doctrines(_doctrine_context(), 2)
+	var memory_relevance := []
+	for doctrine in active_doctrines:
+		if typeof(doctrine) != TYPE_DICTIONARY:
+			continue
+		memory_relevance.append({
+			"id": _limit_inline(str(doctrine.get("id", "")), 80),
+			"summary": _limit_inline(str(doctrine.get("summary", doctrine.get("lesson", ""))), 120),
+		})
+	var blockers: Array[String] = []
+	for step in prerequisite_ladder:
+		if typeof(step) != TYPE_DICTIONARY:
+			continue
+		var status := str(step.get("status", ""))
+		if status == "blocked" or status == "needed":
+			_summary_append(blockers, str(step.get("reason", "")), 5)
+	var evidence_ids: Array[String] = []
+	if ari_memory != null:
+		for snapshot in ari_memory.get_recent_snapshots(4):
+			if typeof(snapshot) == TYPE_DICTIONARY:
+				var snapshot_id := str(snapshot.get("snapshot_id", "")).strip_edges()
+				if snapshot_id != "":
+					_summary_append(evidence_ids, snapshot_id, 4)
+	var packet := {
+		"schema": ARI_UNDERSTANDING_SCHEMA,
+		"trigger": trigger,
+		"source": "deterministic",
+		"sign_thesis": _understanding_sign_thesis(sky_danger),
+		"survival_question": _understanding_survival_question(sky_danger),
+		"intended_strategy": _limit_inline(_understanding_intended_strategy(intended_action, sky_danger), 160),
+		"legal_answers": legal_answers,
+		"prerequisite_ladder": prerequisite_ladder,
+		"body_alignment": _compact_body_alignment(_latest_body_alignment),
+		"blockers": _summary_string_array(blockers, 5, 90),
+		"memory_relevance": memory_relevance,
+		"evidence_ids": evidence_ids,
+		"display_line": _understanding_display_line(intended_action, sky_danger),
+		"confidence": 0.62 if sky_danger or intended_action != "" else 0.35,
+	}
+	return packet
+
+
+func _understanding_mentions_sky_danger() -> bool:
+	var text := "%s %s %s" % [sign_text, sign_interpretation, ai_survival_theory]
+	text = text.to_lower()
+	if text.contains("wing") or text.contains("flying") or text.contains("sky") or text.contains("storm"):
+		return true
+	for key in sign_priority_hints.keys():
+		var action_id := str(key)
+		if ["build_storm_rod", "anti_flying", "anti_air_defense", "sky_answer"].has(action_id) and float(sign_priority_hints[key]) > 0.0:
+			return true
+	var enemy_types := _get_enemy_type_counts()
+	return int(enemy_types.get("flying", 0)) > 0
+
+
+func _understanding_intended_action(sky_danger: bool) -> String:
+	var current_agent_action := _current_agent_step_action_id()
+	if current_agent_action != "":
+		return current_agent_action
+	var active_plan := _active_agent_grounded_plan()
+	if not active_plan.is_empty() and typeof(active_plan[0]) == TYPE_DICTIONARY:
+		var planned := str(active_plan[0].get("affordance_id", active_plan[0].get("action_id", ""))).strip_edges()
+		if planned != "":
+			return planned
+	if sky_danger:
+		return "build_storm_rod"
+	if not sign_grounded_plan.is_empty() and typeof(sign_grounded_plan[0]) == TYPE_DICTIONARY:
+		return str(sign_grounded_plan[0].get("affordance_id", "")).strip_edges()
+	return _local_fallback_agent_action_id(true)
+
+
+func _understanding_sign_thesis(sky_danger: bool) -> String:
+	if sign_text.strip_edges() == "":
+		return "Ari has no sign yet, so survival defaults to local caution."
+	if sky_danger:
+		return "Ari reads the sign as a sky or wing danger that ordinary walls may not answer."
+	if sign_interpretation.strip_edges() != "":
+		return _limit_inline(sign_interpretation, 160)
+	return "Ari has a freeform sign, but only a local survival reading so far."
+
+
+func _understanding_survival_question(sky_danger: bool) -> String:
+	if sky_danger:
+		return "How can Ari answer the sky before wings reach him?"
+	if sign_text.strip_edges() == "":
+		return "What keeps Ari alive until the next readable sign?"
+	return "What concrete legal action best preserves Ari while respecting the sign?"
+
+
+func _understanding_intended_strategy(intended_action: String, sky_danger: bool) -> String:
+	if sky_danger:
+		if storm_rods.size() <= 0:
+			return "Gather what is needed, build a Storm Rod, then use height or cover as support."
+		return "Use the built sky answer, then keep range and cover ready."
+	if intended_action != "":
+		return "Progress toward %s without letting model output move Ari's body directly." % _understanding_action_name(intended_action)
+	return "Watch danger, preserve HP, and use local fallback safety."
+
+
+func _understanding_display_line(intended_action: String, sky_danger: bool) -> String:
+	if sky_danger:
+		if storm_rods.size() <= 0:
+			return "Ari thinks: wings mean sky answer; get Storm Rod ready."
+		return "Ari thinks: sky answer exists; keep range alive."
+	if intended_action != "":
+		return "Ari thinks: %s is the current survival answer." % _understanding_action_name(intended_action)
+	return "Ari thinks: stay alive while the sign stays unclear."
+
+
+func _build_understanding_prerequisite_ladder(intended_action: String, sky_danger: bool) -> Array:
+	var ladder := []
+	var is_night: bool = day_night != null and day_night.is_night()
+	if sky_danger or intended_action == "build_storm_rod":
+		var storm_cost := int(_get_storm_rod_cost().get("stone", 0))
+		if storm_rods.size() <= 0:
+			if _stone_count() < storm_cost:
+				_append_understanding_step(ladder, "mine_stone", "needed", "Need %d stone for Storm Rod; Ari has %d." % [storm_cost, _stone_count()], not is_night)
+				_append_understanding_step(ladder, "build_storm_rod", "blocked", "Needs stone before the sky answer can be built.", false)
+			else:
+				_append_understanding_step(ladder, "build_storm_rod", "ready", "Enough stone exists for the sky answer.", _is_action_available("build_storm_rod"))
+		else:
+			_append_understanding_step(ladder, "build_storm_rod", "accepted", "Storm Rod already exists.", true)
+		if bow_towers.size() <= 0:
+			var tower_cost := int(_get_bow_tower_cost().get("stone", 0))
+			var tower_status := "ready" if _stone_count() >= tower_cost and not is_night else "later"
+			_append_understanding_step(ladder, "build_tower", tower_status, "Height supports the sky answer after Storm Rod.", _is_action_available("build_tower"))
+		else:
+			_append_understanding_step(ladder, "use_tower", "ready", "Tower range can support anti-flying defense.", _is_action_available("use_tower"))
+	if ladder.is_empty() and intended_action != "":
+		_append_understanding_step(ladder, intended_action, "ready" if _is_action_available(intended_action) else "blocked", "Current sign or planner action.", _is_action_available(intended_action))
+	return ladder
+
+
+func _append_understanding_step(ladder: Array, action_id: String, status: String, reason: String, available: bool) -> void:
+	if action_id.strip_edges() == "" or ladder.size() >= 6:
+		return
+	ladder.append({
+		"action_id": action_id,
+		"status": status,
+		"available": available,
+		"reason": _limit_inline(reason, 120),
+	})
+
+
+func _build_understanding_legal_answers(prerequisite_ladder: Array, sky_danger: bool) -> Array:
+	var relevant := _understanding_relevant_actions(prerequisite_ladder, sky_danger)
+	var answers := []
+	for action in _current_agent_legal_actions():
+		if typeof(action) != TYPE_DICTIONARY:
+			continue
+		var action_id := str(action.get("id", "")).strip_edges()
+		if action_id == "":
+			continue
+		if not relevant.has(action_id) and answers.size() >= 6:
+			continue
+		var entry := {
+			"action_id": action_id,
+			"available": bool(action.get("available", true)),
+			"role": _understanding_action_role(action_id),
+			"reason_unavailable": _limit_inline(str(action.get("reason_unavailable", "")), 80),
+			"_score": _understanding_action_score(action_id, relevant, bool(action.get("available", true))),
+		}
+		answers.append(entry)
+	answers.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		return float(left.get("_score", 0.0)) > float(right.get("_score", 0.0))
+	)
+	var capped := []
+	for entry in answers:
+		var clean: Dictionary = entry.duplicate(true)
+		clean.erase("_score")
+		if str(clean.get("reason_unavailable", "")) == "":
+			clean.erase("reason_unavailable")
+		capped.append(clean)
+		if capped.size() >= 8:
+			break
+	return capped
+
+
+func _understanding_relevant_actions(prerequisite_ladder: Array, sky_danger: bool) -> Dictionary:
+	var relevant := {}
+	for step in prerequisite_ladder:
+		if typeof(step) == TYPE_DICTIONARY:
+			relevant[str(step.get("action_id", ""))] = true
+	if sky_danger:
+		for action_id in ["build_storm_rod", "mine_stone", "build_tower", "use_tower", "use_cover", "flee"]:
+			relevant[action_id] = true
+	for key in sign_priority_hints.keys():
+		if float(sign_priority_hints[key]) > 0.0:
+			relevant[str(key)] = true
+	return relevant
+
+
+func _understanding_action_score(action_id: String, relevant: Dictionary, available: bool) -> float:
+	var score := 10.0 if available else 0.0
+	if relevant.has(action_id):
+		score += 100.0
+	score += clampf(float(sign_priority_hints.get(action_id, 0.0)), 0.0, 1.0) * 30.0
+	if action_id == _current_agent_step_action_id():
+		score += 40.0
+	if ["build_storm_rod", "mine_stone", "build_tower", "use_tower"].has(action_id):
+		score += 10.0
+	return score
+
+
+func _understanding_action_role(action_id: String) -> String:
+	match action_id:
+		"mine_stone":
+			return "prerequisite"
+		"build_storm_rod":
+			return "sky_answer"
+		"build_tower", "use_tower":
+			return "range_support"
+		"use_cover", "flee", "stall_until_dawn", "hide_until_dawn":
+			return "safety_fallback"
+		"repair_structure":
+			return "preserve_support"
+	return "legal_action"
+
+
+func _compact_ari_understanding(value, max_ladder: int) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {}
+	if str(value.get("schema", "")) != ARI_UNDERSTANDING_SCHEMA:
+		return {}
+	var compact := {
+		"schema": ARI_UNDERSTANDING_SCHEMA,
+		"sign_thesis": _limit_inline(str(value.get("sign_thesis", "")), 140),
+		"survival_question": _limit_inline(str(value.get("survival_question", "")), 120),
+		"intended_strategy": _limit_inline(str(value.get("intended_strategy", "")), 140),
+		"prerequisite_ladder": _compact_understanding_ladder(value.get("prerequisite_ladder", []), max_ladder),
+		"body_alignment": _compact_body_alignment(value.get("body_alignment", {})),
+		"display_line": _limit_inline(str(value.get("display_line", "")), 120),
+	}
+	var legal_answers := []
+	for answer in value.get("legal_answers", []):
+		if typeof(answer) != TYPE_DICTIONARY:
+			continue
+		legal_answers.append({
+			"action_id": _limit_inline(str(answer.get("action_id", "")), 80),
+			"available": bool(answer.get("available", true)),
+			"role": _limit_inline(str(answer.get("role", "")), 60),
+		})
+		if legal_answers.size() >= 5:
+			break
+	compact["legal_answers"] = legal_answers
+	return compact
+
+
+func _compact_ari_understanding_for_prediction(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {}
+	if str(value.get("schema", "")) != ARI_UNDERSTANDING_SCHEMA:
+		return {}
+	var ladder := []
+	for step in value.get("prerequisite_ladder", []):
+		if typeof(step) != TYPE_DICTIONARY:
+			continue
+		ladder.append({
+			"action_id": _limit_inline(str(step.get("action_id", "")), 50),
+			"status": _limit_inline(str(step.get("status", "")), 24),
+		})
+		if ladder.size() >= 2:
+			break
+	var alignment := _compact_body_alignment(value.get("body_alignment", {}))
+	var compact := {
+		"schema": ARI_UNDERSTANDING_SCHEMA,
+		"survival_question": _limit_inline(str(value.get("survival_question", "")), 60),
+		"prerequisite_ladder": ladder,
+	}
+	if not alignment.is_empty():
+		compact["body_alignment"] = {
+			"relation": alignment.get("relation", ""),
+			"planned_action": alignment.get("planned_action", ""),
+			"body_job": alignment.get("body_job", ""),
+		}
+	return compact
+
+
+func _compact_understanding_ladder(value, max_count: int) -> Array:
+	var result := []
+	if typeof(value) != TYPE_ARRAY:
+		return result
+	for step in value:
+		if typeof(step) != TYPE_DICTIONARY:
+			continue
+		result.append({
+			"action_id": _limit_inline(str(step.get("action_id", "")), 80),
+			"status": _limit_inline(str(step.get("status", "")), 40),
+			"available": bool(step.get("available", false)),
+			"reason": _limit_inline(str(step.get("reason", "")), 100),
+		})
+		if result.size() >= max_count:
+			break
+	return result
+
+
+func _compact_body_alignment(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {}
+	var relation := str(value.get("relation", "")).strip_edges()
+	if relation == "":
+		return {}
+	return {
+		"relation": _limit_inline(relation, 40),
+		"planned_action": _limit_inline(str(value.get("planned_action", "")), 80),
+		"body_job": _limit_inline(str(value.get("body_job", "")), 80),
+		"body_action": _limit_inline(str(value.get("body_action", "")), 80),
+		"reason": _limit_inline(str(value.get("reason", "")), 120),
+		"confidence": clampf(float(value.get("confidence", 0.5)), 0.0, 1.0),
+	}
+
+
+func _build_body_alignment_trace(decision: Dictionary, context: Dictionary = {}) -> Dictionary:
+	var raw_job := str(decision.get("job", decision.get("current_job", ""))).strip_edges()
+	if raw_job == "" and ari != null and ari.has_method("get_current_job"):
+		raw_job = str(ari.call("get_current_job"))
+	var body_action := _normalize_body_job_action(raw_job)
+	var planned_action := _planned_action_from_context(context)
+	var relation := "unknown"
+	if planned_action == "":
+		relation = "unknown"
+	elif _body_actions_equivalent(body_action, planned_action):
+		relation = "accepted"
+	elif _body_job_is_prerequisite(body_action, planned_action):
+		relation = "prerequisite_progress"
+	elif _body_job_is_safety_substitution(body_action, planned_action, context):
+		relation = "safety_substitution"
+	elif not _is_action_available(planned_action):
+		relation = "blocked"
+	else:
+		relation = "mismatch"
+	var trace := {
+		"schema": "ari.body_alignment.v1",
+		"relation": relation,
+		"planned_action": planned_action,
+		"body_job": raw_job,
+		"body_action": body_action,
+		"body_reason": _limit_inline(str(decision.get("reason", "")), 120),
+		"reason": _body_alignment_reason(relation, body_action, planned_action, decision),
+		"confidence": 0.8 if relation in ["accepted", "prerequisite_progress", "safety_substitution"] else 0.55,
+	}
+	_latest_body_alignment = trace.duplicate(true)
+	return trace
+
+
+func _planned_action_from_context(context: Dictionary) -> String:
+	var planned := _current_agent_step_action_id()
+	if planned != "":
+		return planned
+	var current_plan = context.get("current_plan", {})
+	if typeof(current_plan) == TYPE_DICTIONARY:
+		planned = str(current_plan.get("current_action", current_plan.get("next_action", ""))).strip_edges()
+		if planned != "":
+			return planned
+	var grounded = context.get("agent_grounded_plan", [])
+	if typeof(grounded) == TYPE_ARRAY and not grounded.is_empty() and typeof(grounded[0]) == TYPE_DICTIONARY:
+		planned = str(grounded[0].get("affordance_id", grounded[0].get("action_id", ""))).strip_edges()
+		if planned != "":
+			return planned
+	return _local_fallback_agent_action_id(true)
+
+
+func _normalize_body_job_action(job: String) -> String:
+	var clean := job.strip_edges()
+	match clean:
+		"build_bow_tower":
+			return "build_tower"
+		"moving_to_build_site":
+			return "build_site"
+		"moving_to_mine", "mining":
+			return "mine_stone"
+		"mining_ore":
+			return "mine_ore"
+		"moving_to_repair_structure":
+			return "repair_structure"
+		"moving_to_tower", "using_tower_perch":
+			return "use_tower"
+		"moving_to_cover", "waiting_near_defenses":
+			return "use_cover"
+		"moving_to_aura_lure", "luring_through_aura":
+			return "lure_to_aura"
+		"moving_to_tar_lure":
+			return "lure_to_tar_pit"
+		"moving_to_use_fear_lantern":
+			return "use_fear_lantern"
+		"moving_to_decoy":
+			return "use_decoy_idol"
+		"moving_to_use_thorns":
+			return "use_thorns"
+		"moving_to_bed":
+			return "rest"
+		"moving_to_farm":
+			return "farm_food"
+		"moving_to_train":
+			return "train_combat"
+		"moving_to_fight_head_on":
+			return "fight_head_on"
+	return clean
+
+
+func _body_actions_equivalent(body_action: String, planned_action: String) -> bool:
+	if body_action == "" or planned_action == "":
+		return false
+	if body_action == planned_action:
+		return true
+	if body_action == "build_site" and (planned_action.begins_with("build_") or planned_action.begins_with("place_")):
+		return true
+	if body_action == "use_cover" and ["hide_until_dawn", "stall_until_dawn"].has(planned_action):
+		return true
+	return false
+
+
+func _body_job_is_prerequisite(body_action: String, planned_action: String) -> bool:
+	if body_action == "" or planned_action == "":
+		return false
+	if body_action == "mine_stone" and (planned_action.begins_with("build_") or planned_action.begins_with("place_") or ["repair_structure", "use_tower", "build_storm_rod"].has(planned_action)):
+		return true
+	if body_action == "mine_ore" and ["smith_sword", "fight_head_on", "train_sword"].has(planned_action):
+		return true
+	if body_action in ["train_combat", "train_sword"] and planned_action in ["fight_head_on", "smith_sword"]:
+		return true
+	if body_action == "repair_structure" and planned_action in ["use_tower", "use_cover", "build_storm_rod", "lure_to_aura"]:
+		return true
+	if body_action in ["farm_food", "eat_food", "rest"] and planned_action in ["fight_head_on", "use_tower", "build_storm_rod", "use_cover"]:
+		return true
+	return false
+
+
+func _body_job_is_safety_substitution(body_action: String, _planned_action: String, context: Dictionary) -> bool:
+	if not ["use_cover", "flee", "stall_until_dawn", "hide_until_dawn", "eat_food", "rest"].has(body_action):
+		return false
+	var needs = context.get("needs", {})
+	var hp_ratio := float(context.get("ari_hp_ratio", _get_ari_hp_ratio()))
+	var fear := float(needs.get("fear", 0.0)) if typeof(needs) == TYPE_DICTIONARY else 0.0
+	var hunger := float(needs.get("hunger", 0.0)) if typeof(needs) == TYPE_DICTIONARY else 0.0
+	var enemy_count := int(context.get("enemy_count", enemies.size()))
+	return hp_ratio <= 0.35 or fear >= 70.0 or hunger >= 80.0 or enemy_count > 0 or (day_night != null and day_night.is_night())
+
+
+func _body_alignment_reason(relation: String, body_action: String, planned_action: String, decision: Dictionary) -> String:
+	if relation == "prerequisite_progress":
+		if body_action == "mine_stone":
+			return "Mining stone unlocks %s." % _understanding_action_name(planned_action)
+		if body_action == "mine_ore":
+			return "Mining ore unlocks %s." % _understanding_action_name(planned_action)
+		if body_action == "repair_structure":
+			return "Repair preserves support for %s." % _understanding_action_name(planned_action)
+		return "%s prepares %s." % [_understanding_action_name(body_action), _understanding_action_name(planned_action)]
+	if relation == "safety_substitution":
+		return "%s is safer than forcing %s under pressure." % [_understanding_action_name(body_action), _understanding_action_name(planned_action)]
+	if relation == "accepted":
+		return "Ari's body is executing %s." % _understanding_action_name(planned_action)
+	if relation == "blocked":
+		return "%s is blocked by current preconditions." % _understanding_action_name(planned_action)
+	if relation == "mismatch":
+		return "%s does not currently support %s." % [_understanding_action_name(body_action), _understanding_action_name(planned_action)]
+	return _limit_inline(str(decision.get("reason", "")), 120)
+
+
+func _body_alignment_summary_line(alignment: Dictionary) -> String:
+	var relation := str(alignment.get("relation", "")).strip_edges()
+	var planned := str(alignment.get("planned_action", "")).strip_edges()
+	var body := str(alignment.get("body_action", alignment.get("body_job", ""))).strip_edges()
+	var reason := str(alignment.get("reason", "")).strip_edges()
+	if reason != "":
+		return reason
+	if relation == "prerequisite_progress":
+		return "%s prepared %s." % [_understanding_action_name(body), _understanding_action_name(planned)]
+	if relation == "safety_substitution":
+		return "%s safely substituted for %s." % [_understanding_action_name(body), _understanding_action_name(planned)]
+	if relation == "mismatch":
+		return "%s diverged from %s." % [_understanding_action_name(body), _understanding_action_name(planned)]
+	return "%s matched %s." % [_understanding_action_name(body), _understanding_action_name(planned)]
+
+
+func _understanding_action_name(action_id: String) -> String:
+	match action_id:
+		"build_storm_rod":
+			return "Storm Rod"
+		"mine_stone":
+			return "mining stone"
+		"build_tower":
+			return "tower"
+		"use_tower":
+			return "tower range"
+		"use_cover":
+			return "cover"
+		"flee":
+			return "distance"
+		"repair_structure":
+			return "repair"
+		"lure_to_aura":
+			return "aura lure"
+		"fight_head_on":
+			return "melee"
+		"smith_sword":
+			return "sword forge"
+	return action_id.replace("_", " ")
 
 
 func _current_affordances() -> Array:
