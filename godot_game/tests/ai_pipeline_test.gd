@@ -42,6 +42,7 @@ func _run() -> void:
 	_test_ai_bridge_endpoint_specific_timeouts(bridge)
 	_test_deep_interpretation_contract(bridge)
 	_test_agent_plan_contract(bridge)
+	_test_bridge_preserves_gateway_fallback_source(bridge)
 	_test_agent_plan_doctrine_prerequisite_guard(bridge)
 	_test_ari_doctrine_conditional_bias()
 	_test_ari_doctrine_deduplicates_repeated_lessons()
@@ -791,6 +792,63 @@ func _test_agent_plan_contract(bridge: AIBridge) -> void:
 	}, flying_payload, true, "remote_server")
 	_assert(guarded_flying.get("next_action", {}).get("action_id", "") == "build_storm_rod", "AIBridge should rewrite cover to Storm Rod when flying enemies are present")
 	_assert(guarded_flying.get("plan", [])[0].get("action_id", "") == "build_storm_rod", "AIBridge guarded flying plan should start with Storm Rod")
+
+
+func _test_bridge_preserves_gateway_fallback_source(bridge: AIBridge) -> void:
+	var deep_payload := {
+		"sign_text": "build walls and stay behind them",
+		"local_fallback": {
+			"interpretation": "Ari falls back to local cover reading.",
+			"priority_hints": {"build_wall": 0.4},
+			"grounded_plan": [{"affordance_id": "build_wall", "priority": 0.4}],
+		},
+	}
+	var deep_body := JSON.stringify({
+		"interpretation": "Deterministic gateway fallback reading.",
+		"thought": "I need cover.",
+		"survival_theory": "Use local cover.",
+		"emotion": "uncertain",
+		"grounded_plan": [{"affordance_id": "build_wall", "priority": 0.4}],
+		"priority_hints": {"build_wall": 0.4},
+		"sign_strength": 0.4,
+		"resonance": 0.4,
+		"source": "local_fallback",
+		"failure_reason": "deterministic_deep",
+	}).to_utf8_buffer()
+	var deep_result: Dictionary = bridge.call("_parse_deep_interpretation_response", deep_payload, HTTPRequest.RESULT_SUCCESS, 200, deep_body)
+	_assert(deep_result.get("source", "") == "local_fallback", "deep response parsing should preserve gateway fallback source")
+	_assert(deep_result.get("failure_reason", "") == "deterministic_deep", "deep response parsing should preserve gateway fallback reason")
+
+	var plan_payload := {
+		"legal_actions": [
+			{"id": "use_cover", "available": true},
+			{"id": "flee", "available": true},
+		],
+		"local_fallback": {
+			"goal": "local cover",
+			"survival_theory": "Use local cover.",
+			"plan": [{"step_id": "fallback_cover", "action_id": "use_cover", "reason": "Wall exists.", "success": "safe"}],
+			"next_action": {"action_id": "use_cover", "urgency": 0.4, "reason": "Use cover."},
+			"fallback_action": {"action_id": "flee", "urgency": 0.2, "reason": "Distance remains legal."},
+			"thought": "I can use cover.",
+		},
+	}
+	var plan_body := JSON.stringify({
+		"schema": "ari.agent.plan.v1",
+		"goal": "gateway fallback",
+		"survival_theory": "The model did not answer in time.",
+		"plan": [{"step_id": "fallback_cover", "action_id": "use_cover", "reason": "Fallback cover.", "success": "safe"}],
+		"next_action": {"action_id": "use_cover", "urgency": 0.4, "reason": "Fallback cover."},
+		"fallback_action": {"action_id": "flee", "urgency": 0.2, "reason": "Distance remains legal."},
+		"thought": "I can use cover.",
+		"confidence": 0.35,
+		"replan_after_seconds": 8.0,
+		"source": "local_fallback",
+		"failure_reason": "model_timeout",
+	}).to_utf8_buffer()
+	var plan_result: Dictionary = bridge.call("_parse_agent_plan_response", plan_payload, HTTPRequest.RESULT_SUCCESS, 200, plan_body)
+	_assert(plan_result.get("source", "") == "local_fallback", "agent plan parsing should preserve gateway fallback source")
+	_assert(plan_result.get("failure_reason", "") == "model_timeout", "agent plan parsing should preserve gateway fallback reason")
 
 
 func _test_agent_plan_doctrine_prerequisite_guard(bridge: AIBridge) -> void:
@@ -3054,8 +3112,8 @@ func _test_ai_tactical_priority_jobs() -> void:
 			"wall": 0.45,
 		},
 	}))
-	_assert(repair_bench_needs_walls_decision.get("job", "") == "build_wall", "repair tools should not outrank adding enough walls to repair")
-	_assert(str(repair_bench_needs_walls_decision.get("reason", "")).to_lower().contains("wall"), "repair-wall sequencing should explain that walls come first")
+	_assert(repair_bench_needs_walls_decision.get("job", "") == "build_repair_bench", "repair tools should be built when an existing defense can later need maintenance")
+	_assert(str(repair_bench_needs_walls_decision.get("reason", "")).to_lower().contains("repair"), "repair-tool sequencing should explain that maintenance tools are being prepared")
 
 	var repair_bench_ready_decision := ari_mind.choose_daytime_job(_base_mind_context({
 		"wall_count": 2,

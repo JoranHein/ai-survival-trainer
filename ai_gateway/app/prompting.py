@@ -35,13 +35,16 @@ No wrapper. No prose. Do not invent actions, coordinates, movement paths, or gam
 
 SCRIBE_SYSTEM_PROMPT = """You are Ari's lightweight observer-scribe.
 Read compact structured game snapshots and recent events. Write one short moment note about what Ari noticed or misunderstood.
-Return minified JSON only. Schema exactly: {"schema":"ari.scribe.note.v2","note":string,"facts":[string],"actions":[{"action":string,"status":string,"reason":string}],"dangers":[{"type":string,"distance":number,"severity":number}],"world_changes":[string],"tags":[string],"priority_hints":object,"plan_alignment":"aligned|supporting|mismatch|unknown","immediate_risk":"none|low|medium|high|lethal","risk_reason":string,"resource_blockers":[string],"mistake_candidates":[string],"opportunity_candidates":[string],"lesson_candidates":[string],"confidence":number,"salience":number}.
+Return minified JSON only. Schema exactly: {"schema":"ari.scribe.note.v2","note":string,"facts":[string],"actions":[{"action":string,"status":string,"reason":string}],"dangers":[{"type":string,"distance":number,"severity":number}],"world_changes":[string],"tags":[string],"priority_hints":object,"plan_alignment":"aligned|supporting|mismatch|unknown","immediate_risk":"none|low|medium|high|lethal","risk_reason":string,"resource_blockers":[string],"mistake_candidates":[string],"opportunity_candidates":[string],"lesson_candidates":[string],"behavior_evidence":[object],"confidence":number,"salience":number}.
 facts/actions/dangers/world_changes must come from snapshots or events only. priority_hints may only bias future planning.
+Behavior evidence is factual; describe it plainly but do not prescribe the lesson or fix.
 Do not mutate game state. Do not invent actions. Keep note under 35 words and each list short."""
 
 
 LIBRARY_REFLECTION_SYSTEM_PROMPT = """Output exactly one minified JSON object with only keys t,m,changed,worked,wrong,mis,lesson,h,bias,belief,doctrine,thought,c.
 No wrapper. No prose. Use supplied facts only. h/bias/doctrine plan actions must be real Ari affordance ids.
+If behavior evidence is supplied, decide whether it was useful adaptation, prerequisite progress, safety substitution, indecision, repeated blocked action, wasted time, bad plan, or missing resources. Do not assume the fix.
+Doctrine may include a control object with preferred_anchor_kind, min_hold_seconds, avoid_action_ids, and allowed_break_reasons; this is advice only.
 The engine owns movement, combat, building, resources, damage, and state mutation."""
 
 
@@ -160,6 +163,7 @@ def agent_plan_user_prompt(request: AgentPlanRequest) -> str:
                 "try": strategy.get("try_next", []),
             }, 520),
             "understanding=%s" % _compact_json(_compact_understanding(strategy.get("understanding", {})), 420),
+            "behavior=%s" % _compact_json(_compact_behavior_evidence(request.behavior_evidence or strategy.get("behavior_evidence", []), 2), 420),
             "panel=%s" % _compact_json(_compact_action_control_panel(request.action_control_panel, 12), 950),
             "doctrine_plan=%s doctrines=%s" % (_compact_json(request.active_doctrine_plan[:4], 360), _compact_json(request.active_doctrines[:3], 360)),
             "recent=%s current=%s" % (_compact_json(request.recent_outcomes[:4], 320), _compact_json(request.current_plan, 280)),
@@ -178,6 +182,7 @@ def scribe_user_prompt(request: BridgePayloadRequest) -> str:
             "Current sign: %s" % str(payload.get("current_sign", payload.get("sign", "")))[:400],
             "Phase/day: day=%s phase=%s" % (payload.get("day", ""), payload.get("phase", "")),
             "Active plan: %s" % _compact_json(payload.get("active_plan", {}), 600),
+            "Behavior evidence: %s" % _compact_json(_compact_behavior_evidence(payload.get("behavior_evidence", []), 3), 620),
             "Recent events: %s" % _compact_json(_slice_list(payload.get("recent_events", []), 12), 1200),
             "Recent snapshots: %s" % _compact_json(_slice_list(payload.get("snapshots", payload.get("recent_snapshots", [])), 6), 1600),
             "Return JSON only with schema ari.scribe.note.v2. Extract facts/actions/dangers/world_changes from supplied facts only. Include plan_alignment, immediate_risk, blockers, mistake/opportunity/lesson candidates. priority_hints may contain only concrete survival affordance ids.",
@@ -192,12 +197,15 @@ def library_reflection_user_prompt(request: BridgePayloadRequest) -> str:
     compact_notes = _compact_scribe_notes(payload.get("scribe_notes", []), 4)
     compact_events = _compact_reflection_events(payload.get("recent_events", []), 8)
     compact_outcomes = _compact_reflection_outcomes(payload.get("agent_plan_outcomes", []), 5)
+    compact_behavior = _compact_behavior_evidence(payload.get("behavior_evidence", day_summary.get("behavior_evidence", [])), 3)
     return "\n".join(
         [
             "Ari nightly reflection. Use Day summary first; details only support it.",
+            "If behavior evidence appears, decide whether behavior evidence was useful adaptation, prerequisite progress, safety substitution, indecision, repeated blocked action, wasted time, a bad plan, or missing resources.",
             "meta trigger=%s day=%s outcome=%s" % (payload.get("trigger", ""), payload.get("day", ""), payload.get("outcome", "")),
             "Sign: %s" % _compact_json(payload.get("sign", {}), 280),
             "Day summary: %s" % _compact_json(compact_summary, 620),
+            "Behavior evidence: %s" % _compact_json(compact_behavior, 520),
             "Recent events: %s" % _compact_json(compact_events, 360),
             "Scribe notes: %s" % _compact_json(compact_notes, 420),
             "Agent outcomes: %s" % _compact_json(compact_outcomes, 280),
@@ -285,6 +293,7 @@ def _compact_day_summary(summary: object) -> dict[str, object]:
         "lessons": [str(value)[:100] for value in _slice_list(summary.get("candidate_lessons", []), 4)],
         "hints": [str(value)[:50] for value in _slice_list(summary.get("recommended_priority_hints", []), 4)],
         "evidence": [str(value)[:60] for value in _slice_list(summary.get("evidence_snapshot_ids", []), 4)],
+        "behavior_patterns": [str(value)[:60] for value in _slice_list(summary.get("behavior_patterns", []), 3)],
     }
     return {key: value for key, value in compact.items() if value not in ("", [], {})}
 
@@ -344,8 +353,60 @@ def _compact_reflection_doctrines(doctrines: object, max_doctrines: int) -> list
             "summary": str(raw.get("summary", raw.get("title", "")))[:100],
             "bias": raw.get("bias", raw.get("priority_bias", {})),
             "plan": _slice_list(raw.get("plan", []), 2),
+            "control": raw.get("control", {}),
         }
         compact.append({key: value for key, value in item.items() if value not in ("", [], {})})
+    return compact
+
+
+def _compact_behavior_evidence(value: object, max_items: int) -> list[dict[str, object]]:
+    if isinstance(value, dict):
+        rows = [value]
+    elif isinstance(value, list):
+        rows = value
+    else:
+        return []
+    compact: list[dict[str, object]] = []
+    for raw in rows[:max_items]:
+        if not isinstance(raw, dict):
+            continue
+        pattern = str(raw.get("primary_pattern", ""))[:80]
+        if not pattern:
+            continue
+        progress = raw.get("progress_delta", {})
+        if not isinstance(progress, dict):
+            progress = {}
+        context = raw.get("context", {})
+        if not isinstance(context, dict):
+            context = {}
+        item: dict[str, object] = {
+            "p": pattern,
+            "a": [str(action)[:60] for action in _slice_list(raw.get("actions_seen", []), 5)],
+            "sw": raw.get("transition_count", 0),
+            "done": raw.get("completion_count", 0),
+            "blocked": raw.get("blocked_count", 0),
+            "abandoned": raw.get("abandoned_count", 0),
+            "anchors": [str(anchor)[:60] for anchor in _slice_list(raw.get("anchors_seen", []), 4)],
+            "anchor_sw": raw.get("anchor_transition_count", 0),
+            "delta": {
+                str(key)[:32]: progress[key]
+                for key in ("structures", "stone", "repairs", "kills", "hp")
+                if key in progress
+            },
+            "ctx": {
+                str(key)[:36]: context[key]
+                for key in (
+                    "phase",
+                    "enemy_count_before",
+                    "enemy_count_after",
+                    "nearest_danger_changed",
+                    "active_plan_changed",
+                )
+                if key in context
+            },
+            "s": str(raw.get("neutral_summary", ""))[:180],
+        }
+        compact.append({key: item_value for key, item_value in item.items() if item_value not in ("", [], {})})
     return compact
 
 

@@ -249,6 +249,40 @@ def test_agent_plan_prompt_includes_compact_nested_understanding():
     assert len(prompt) < 2700
 
 
+def test_agent_plan_prompt_includes_behavior_evidence_and_related_doctrine():
+    payload = _plan_payload()
+    payload["behavior_evidence"] = [{
+        "schema": "ari.behavior_evidence.v1",
+        "primary_pattern": "repeated_action_switching",
+        "actions_seen": ["build_wall", "repair_structure", "use_cover"],
+        "transition_count": 6,
+        "completion_count": 0,
+        "neutral_summary": "Ari switched between build_wall, repair_structure, and use_cover 6 times; no build or repair completed.",
+    }]
+    payload["strategy_packet"] = {
+        "schema": "ari.strategy_packet.v1",
+        "behavior_evidence": payload["behavior_evidence"],
+        "avoid_repeating": [],
+        "try_next": [],
+    }
+    payload["active_doctrines"] = [{
+        "id": "reflection_finish_defense_before_switching",
+        "summary": "When repeated switching happens without changed danger, keep one legal defense step long enough.",
+        "when": {"behavior_pattern": "repeated_action_switching", "danger_changed": False},
+        "plan": [{"affordance_id": "build_wall", "priority": 0.62}],
+        "confidence": 0.42,
+    }]
+    payload["active_doctrine_plan"] = [{"affordance_id": "build_wall", "priority": 0.62}]
+
+    prompt = agent_plan_user_prompt(AgentPlanRequest(**payload))
+
+    assert "behavior=" in prompt
+    assert "repeated_action_switching" in prompt
+    assert "switched between" in prompt
+    assert "reflection_finish_defense_before_switching" in prompt
+    assert len(prompt) < 3000
+
+
 def test_agent_plan_prompt_compacts_local_fallback_without_thought_prose():
     payload = _plan_payload()
     payload["local_fallback"]["thought"] = "I can still choose a legal fallback."

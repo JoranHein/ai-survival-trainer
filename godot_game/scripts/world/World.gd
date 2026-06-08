@@ -35,6 +35,10 @@ const BACKGROUND_AI_RESULT_CAP := 8
 const ACTION_CONTROL_PANEL_DEFAULT_CAP := 24
 const ACTION_CONTROL_PANEL_FAST_CAP := 14
 const ARI_UNDERSTANDING_SCHEMA := "ari.understanding.v1"
+const BEHAVIOR_EVIDENCE_SCHEMA := "ari.behavior_evidence.v1"
+const BEHAVIOR_EVIDENCE_WINDOW_SECONDS := 45.0
+const BEHAVIOR_ACTION_HISTORY_CAP := 32
+const BEHAVIOR_EVIDENCE_CAP := 4
 const AGENT_NONEXECUTABLE_ACTION_IDS := {
 	"anti_flying": true,
 	"anti_air_defense": true,
@@ -164,6 +168,9 @@ var _observer_snapshot_elapsed := 0.0
 var _observer_scribe_elapsed := 0.0
 var _observer_scribe_request_in_flight := false
 var _observer_recent_damage := 0.0
+var _behavior_action_history: Array = []
+var _latest_behavior_evidence := {}
+var _behavior_sample_sequence := 0
 var _fast_prediction_elapsed := 0.0
 var _fast_prediction_request_in_flight := false
 var _fast_prediction_request_id := 0
@@ -341,6 +348,9 @@ func start_run() -> void:
 	_observer_scribe_elapsed = 0.0
 	_observer_scribe_request_in_flight = false
 	_observer_recent_damage = 0.0
+	_behavior_action_history.clear()
+	_latest_behavior_evidence = {}
+	_behavior_sample_sequence = 0
 	_fast_prediction_elapsed = 0.0
 	_fast_prediction_request_in_flight = false
 	_fast_prediction_request_id = 0
@@ -1599,6 +1609,324 @@ func _has_urgent_prediction_risk() -> bool:
 	return false
 
 
+func _record_behavior_action_sample(action_id: String, status := "in_progress", reason := "", trigger := "") -> Dictionary:
+	var clean_action := action_id.strip_edges()
+	if clean_action == "":
+		return {}
+	_behavior_sample_sequence += 1
+	var nearest := _observer_nearest_danger()
+	var sample := {
+		"sample_id": "day%d_%04d_behavior_%03d" % [day_night.day, int(round(_agent_plan_clock * 10.0)), _behavior_sample_sequence],
+		"day": day_night.day,
+		"phase": day_night.phase,
+		"time": _agent_plan_clock,
+		"action_id": clean_action,
+		"status": _limit_inline(str(status), 40),
+		"reason": _limit_inline(str(reason), 140),
+		"trigger": _limit_inline(str(trigger), 80),
+		"plan_action": _current_agent_step_action_id(),
+		"stone": _stone_count(),
+		"food": _food_count(),
+		"ore": _ore_count(),
+		"hp": float(ari.get("hp")) if ari != null else 0.0,
+		"structures": structures.size(),
+		"damaged_structures": _get_damaged_structure_count(),
+		"enemy_count": enemies.size(),
+		"enemy_type_counts": _get_enemy_type_counts(),
+		"nearest_danger": nearest,
+		"anchor_id": _behavior_anchor_id(clean_action, reason),
+	}
+	_behavior_action_history.append(sample)
+	_trim_behavior_action_history()
+	_latest_behavior_evidence = _build_behavior_evidence_from_history()
+	return sample.duplicate(true)
+
+
+func _trim_behavior_action_history() -> void:
+	while _behavior_action_history.size() > BEHAVIOR_ACTION_HISTORY_CAP:
+		_behavior_action_history.pop_front()
+	var cutoff := _agent_plan_clock - BEHAVIOR_EVIDENCE_WINDOW_SECONDS
+	while _behavior_action_history.size() > 1:
+		var first = _behavior_action_history[0]
+		if typeof(first) != TYPE_DICTIONARY or float(first.get("time", 0.0)) >= cutoff:
+			break
+		_behavior_action_history.pop_front()
+
+
+func _behavior_anchor_id(action_id: String, reason: String = "") -> String:
+	var text := ("%s %s" % [action_id, reason]).to_lower()
+	if text.find("tower") >= 0 or text.find("range") >= 0 or text.find("perch") >= 0:
+		return "tower"
+	if text.find("aura") >= 0 or text.find("light") >= 0:
+		return "aura"
+	if text.find("wall") >= 0 or text.find("cover") >= 0:
+		return "cover"
+	if text.find("lantern") >= 0 or text.find("warm") >= 0:
+		return "fear_lantern"
+	if text.find("decoy") >= 0 or text.find("false self") >= 0:
+		return "decoy"
+	if text.find("thorn") >= 0:
+		return "thorn"
+	if text.find("repair") >= 0 or text.find("patch") >= 0:
+		return "repair_target"
+	if text.find("mine") >= 0 or text.find("stone") >= 0:
+		return "resource_node"
+	return ""
+
+
+func _current_behavior_evidence() -> Dictionary:
+	if _latest_behavior_evidence.is_empty():
+		_latest_behavior_evidence = _build_behavior_evidence_from_history()
+	return _latest_behavior_evidence.duplicate(true)
+
+
+func _behavior_evidence_array(max_count: int = BEHAVIOR_EVIDENCE_CAP) -> Array:
+	var items := _build_behavior_evidence_items_from_history()
+	if items.is_empty() and not _latest_behavior_evidence.is_empty():
+		items = [_latest_behavior_evidence]
+	var result := []
+	for item in items:
+		var evidence := _compact_behavior_evidence(item)
+		if evidence.is_empty():
+			continue
+		result.append(evidence)
+		if result.size() >= max_count:
+			break
+	return result
+
+
+func _behavior_evidence_compact_array(value, max_count: int = BEHAVIOR_EVIDENCE_CAP) -> Array:
+	var result := []
+	if typeof(value) == TYPE_DICTIONARY:
+		var evidence := _compact_behavior_evidence(value)
+		if not evidence.is_empty():
+			result.append(evidence)
+	elif typeof(value) == TYPE_ARRAY:
+		for item in value:
+			var evidence := _compact_behavior_evidence(item)
+			if evidence.is_empty():
+				continue
+			result.append(evidence)
+			if result.size() >= max_count:
+				break
+	return result
+
+
+func _build_behavior_evidence_from_history() -> Dictionary:
+	var items := _build_behavior_evidence_items_from_history()
+	if items.is_empty():
+		return {}
+	return items[0].duplicate(true)
+
+
+func _build_behavior_evidence_items_from_history() -> Array:
+	if _behavior_action_history.size() < 2:
+		return []
+	var samples := []
+	var first_time := float(_behavior_action_history[0].get("time", _agent_plan_clock))
+	var cutoff := _agent_plan_clock - BEHAVIOR_EVIDENCE_WINDOW_SECONDS
+	for item in _behavior_action_history:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		if float(item.get("time", first_time)) < cutoff:
+			continue
+		samples.append(item)
+	if samples.size() < 2:
+		return []
+	var first: Dictionary = samples[0]
+	var last: Dictionary = samples[samples.size() - 1]
+	var actions_seen: Array[String] = []
+	var anchors_seen: Array[String] = []
+	var evidence_ids: Array[String] = []
+	var transition_count := 0
+	var anchor_transition_count := 0
+	var completion_count := 0
+	var blocked_count := 0
+	var explicit_abandoned_count := 0
+	var previous_action := ""
+	var previous_anchor := ""
+	for sample in samples:
+		var action := str(sample.get("action_id", "")).strip_edges()
+		if action != "":
+			_summary_append(actions_seen, action, 8)
+		var anchor_id := str(sample.get("anchor_id", "")).strip_edges()
+		if anchor_id != "":
+			_summary_append(anchors_seen, anchor_id, 8)
+		var sample_id := str(sample.get("sample_id", "")).strip_edges()
+		if sample_id != "":
+			_summary_append(evidence_ids, sample_id, 12)
+		var status_text := str(sample.get("status", "")).strip_edges().to_lower()
+		if status_text.contains("completed") or status_text == "action_completed":
+			completion_count += 1
+		if status_text.contains("blocked"):
+			blocked_count += 1
+		if status_text.contains("abandoned"):
+			explicit_abandoned_count += 1
+		if previous_action != "" and action != "" and action != previous_action:
+			transition_count += 1
+		if action != "":
+			previous_action = action
+		if previous_anchor != "" and anchor_id != "" and anchor_id != previous_anchor:
+			anchor_transition_count += 1
+		if anchor_id != "":
+			previous_anchor = anchor_id
+	var structures_delta := int(last.get("structures", 0)) - int(first.get("structures", 0))
+	var stone_delta := int(last.get("stone", 0)) - int(first.get("stone", 0))
+	var damaged_delta := int(last.get("damaged_structures", 0)) - int(first.get("damaged_structures", 0))
+	var repairs_delta := maxi(0, -damaged_delta)
+	var hp_delta := int(round(float(last.get("hp", 0.0)) - float(first.get("hp", 0.0))))
+	var primary_pattern := ""
+	if transition_count >= 4 and completion_count == 0 and structures_delta <= 0 and repairs_delta == 0:
+		primary_pattern = "repeated_action_switching"
+	elif blocked_count >= 2:
+		primary_pattern = "repeated_blocked_action"
+	elif explicit_abandoned_count >= 2 and structures_delta <= 0 and repairs_delta == 0:
+		primary_pattern = "abandoned_before_progress"
+	elif stone_delta < 0 and structures_delta <= 0 and repairs_delta == 0:
+		primary_pattern = "resource_spend_without_progress"
+	var first_danger = first.get("nearest_danger", {})
+	var last_danger = last.get("nearest_danger", {})
+	var first_danger_type := str(first_danger.get("type", "none")) if typeof(first_danger) == TYPE_DICTIONARY else "none"
+	var last_danger_type := str(last_danger.get("type", "none")) if typeof(last_danger) == TYPE_DICTIONARY else "none"
+	var first_plan := str(first.get("plan_action", ""))
+	var last_plan := str(last.get("plan_action", ""))
+	var window_seconds := maxf(float(last.get("time", _agent_plan_clock)) - float(first.get("time", _agent_plan_clock)), 0.0)
+	var base := {
+		"schema": BEHAVIOR_EVIDENCE_SCHEMA,
+		"window_seconds": clampf(window_seconds, 0.0, BEHAVIOR_EVIDENCE_WINDOW_SECONDS),
+		"actions_seen": actions_seen,
+		"transition_count": transition_count,
+		"completion_count": completion_count,
+		"blocked_count": blocked_count,
+		"abandoned_count": maxi(explicit_abandoned_count, transition_count - completion_count),
+		"progress_delta": {
+			"structures": structures_delta,
+			"stone": stone_delta,
+			"repairs": repairs_delta,
+			"kills": 0,
+			"hp": hp_delta,
+		},
+		"context": {
+			"phase": str(last.get("phase", day_night.phase)),
+			"enemy_count_before": int(first.get("enemy_count", 0)),
+			"enemy_count_after": int(last.get("enemy_count", 0)),
+			"nearest_danger_changed": first_danger_type != last_danger_type,
+			"active_plan_changed": first_plan != last_plan,
+		},
+		"evidence_ids": evidence_ids,
+	}
+	var results := []
+	if primary_pattern != "":
+		var action_evidence: Dictionary = base.duplicate(true)
+		action_evidence["primary_pattern"] = primary_pattern
+		action_evidence["neutral_summary"] = _behavior_neutral_summary(primary_pattern, actions_seen, transition_count, completion_count, window_seconds)
+		results.append(action_evidence)
+	if anchor_transition_count >= 4 and completion_count == 0 and anchors_seen.size() >= 2:
+		var anchor_evidence: Dictionary = base.duplicate(true)
+		anchor_evidence["primary_pattern"] = "repeated_anchor_switching"
+		anchor_evidence["anchors_seen"] = anchors_seen
+		anchor_evidence["anchor_transition_count"] = anchor_transition_count
+		anchor_evidence["neutral_summary"] = "Ari switched defensive anchors between %s %d times in %.0f seconds; no build or repair completed." % [_human_behavior_action_list(anchors_seen), anchor_transition_count, window_seconds]
+		results.append(anchor_evidence)
+	return results
+
+
+func _behavior_neutral_summary(pattern: String, actions_seen: Array[String], transition_count: int, completion_count: int, window_seconds: float) -> String:
+	var action_text := _human_behavior_action_list(actions_seen)
+	match pattern:
+		"repeated_action_switching":
+			return "Ari switched between %s %d times in %.0f seconds; %s." % [action_text, transition_count, window_seconds, "no build or repair completed" if completion_count == 0 else "%d action(s) completed" % completion_count]
+		"repeated_blocked_action":
+			return "Ari repeated blocked action attempts around %s in %.0f seconds." % [action_text, window_seconds]
+		"abandoned_before_progress":
+			return "Ari left %s before visible progress completed in %.0f seconds." % [action_text, window_seconds]
+		"resource_spend_without_progress":
+			return "Ari spent resources during %s without visible structure or repair progress." % action_text
+	return "Ari showed behavior pattern %s around %s." % [pattern, action_text]
+
+
+func _human_behavior_action_list(actions: Array[String]) -> String:
+	if actions.is_empty():
+		return "unknown actions"
+	if actions.size() == 1:
+		return actions[0]
+	if actions.size() == 2:
+		return "%s and %s" % [actions[0], actions[1]]
+	return "%s, and %s" % [", ".join(actions.slice(0, actions.size() - 1)), actions[actions.size() - 1]]
+
+
+func _compact_behavior_evidence(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {}
+	var pattern := _limit_inline(str(value.get("primary_pattern", "")), 80)
+	if pattern == "":
+		return {}
+	var context = value.get("context", {})
+	var safe_context := {}
+	if typeof(context) == TYPE_DICTIONARY:
+		safe_context = {
+			"phase": _limit_inline(str(context.get("phase", "")), 40),
+			"enemy_count_before": max(0, int(context.get("enemy_count_before", 0))),
+			"enemy_count_after": max(0, int(context.get("enemy_count_after", 0))),
+			"nearest_danger_changed": bool(context.get("nearest_danger_changed", false)),
+			"active_plan_changed": bool(context.get("active_plan_changed", false)),
+		}
+	var progress = value.get("progress_delta", {})
+	var safe_progress := {}
+	if typeof(progress) == TYPE_DICTIONARY:
+		safe_progress = {
+			"structures": int(progress.get("structures", 0)),
+			"stone": int(progress.get("stone", 0)),
+			"repairs": int(progress.get("repairs", 0)),
+			"kills": int(progress.get("kills", 0)),
+			"hp": int(progress.get("hp", 0)),
+		}
+	return {
+		"schema": BEHAVIOR_EVIDENCE_SCHEMA,
+		"window_seconds": clampf(float(value.get("window_seconds", 0.0)), 0.0, BEHAVIOR_EVIDENCE_WINDOW_SECONDS),
+		"primary_pattern": pattern,
+		"actions_seen": _summary_string_array(value.get("actions_seen", []), 8, 80),
+		"transition_count": max(0, int(value.get("transition_count", 0))),
+		"completion_count": max(0, int(value.get("completion_count", 0))),
+		"blocked_count": max(0, int(value.get("blocked_count", 0))),
+		"abandoned_count": max(0, int(value.get("abandoned_count", 0))),
+		"anchors_seen": _summary_string_array(value.get("anchors_seen", []), 8, 80),
+		"anchor_transition_count": max(0, int(value.get("anchor_transition_count", 0))),
+		"progress_delta": safe_progress,
+		"context": safe_context,
+		"evidence_ids": _summary_string_array(value.get("evidence_ids", []), 12, 120),
+		"neutral_summary": _limit_inline(str(value.get("neutral_summary", "")), 220),
+	}
+
+
+func _collect_summary_behavior_evidence(source, behavior_evidence: Array, behavior_patterns: Array[String], evidence_ids: Array[String], what_changed: Array[String], went_wrong: Array[String], candidate_lessons: Array[String]) -> void:
+	if typeof(source) == TYPE_ARRAY:
+		for item in source:
+			_collect_summary_behavior_evidence(item, behavior_evidence, behavior_patterns, evidence_ids, what_changed, went_wrong, candidate_lessons)
+		return
+	var evidence := _compact_behavior_evidence(source)
+	if evidence.is_empty():
+		return
+	var pattern := str(evidence.get("primary_pattern", "")).strip_edges()
+	if pattern == "":
+		return
+	_summary_append(behavior_patterns, pattern, BEHAVIOR_EVIDENCE_CAP)
+	_summary_append(what_changed, pattern, 10)
+	var neutral_summary := str(evidence.get("neutral_summary", "")).strip_edges()
+	if neutral_summary != "":
+		_summary_append(went_wrong, neutral_summary, 8)
+	_summary_append(candidate_lessons, "review whether %s helped survival" % pattern, 8)
+	for evidence_id in _summary_string_array(evidence.get("evidence_ids", []), 12, 120):
+		_summary_append(evidence_ids, evidence_id, 12)
+	var duplicate := false
+	for existing in behavior_evidence:
+		if typeof(existing) == TYPE_DICTIONARY and str(existing.get("primary_pattern", "")) == pattern:
+			duplicate = true
+			break
+	if not duplicate and behavior_evidence.size() < BEHAVIOR_EVIDENCE_CAP:
+		behavior_evidence.append(evidence)
+
+
 func _build_observer_snapshot(trigger: String, salience := 0.0, notable_changes: Array = []) -> Dictionary:
 	_refresh_ari_understanding(trigger)
 	var ari_job := str(ari.call("get_current_job")) if ari != null and ari.has_method("get_current_job") else "wait_or_idle"
@@ -1612,6 +1940,8 @@ func _build_observer_snapshot(trigger: String, salience := 0.0, notable_changes:
 	var next_action := _current_agent_step_action_id()
 	if next_action == "":
 		next_action = _local_fallback_agent_action_id()
+	_record_behavior_action_sample(ari_action, "in_progress", ari_reason, trigger)
+	var behavior_evidence := _current_behavior_evidence()
 	return {
 		"schema": "ari.observer.snapshot.v1",
 		"snapshot_id": "day%d_%04d_%s" % [day_night.day, int(round(_agent_plan_clock * 10.0)), trigger],
@@ -1645,6 +1975,7 @@ func _build_observer_snapshot(trigger: String, salience := 0.0, notable_changes:
 		},
 		"understanding": _compact_ari_understanding(ari_understanding, 4),
 		"body_alignment": _compact_body_alignment(_latest_body_alignment),
+		"behavior_evidence": behavior_evidence,
 		"world": {
 			"resources": {"food": _food_count(), "stone": _stone_count(), "ore": _ore_count()},
 			"run_build": _observer_run_build_summary(),
@@ -1699,6 +2030,7 @@ func _build_scribe_context() -> Dictionary:
 		"active_plan": _agent_current_plan_payload(),
 		"understanding": _compact_ari_understanding(ari_understanding, 4),
 		"body_alignment": _compact_body_alignment(_latest_body_alignment),
+		"behavior_evidence": _behavior_evidence_array(BEHAVIOR_EVIDENCE_CAP),
 		"snapshots": ari_memory.get_recent_snapshots(10),
 		"max_words": 35,
 	}
@@ -1750,6 +2082,7 @@ func _build_night_reflection_payload(trigger: String, outcome: String) -> Dictio
 		"understanding": _compact_ari_understanding(ari_understanding, 4),
 		"body_alignment": _compact_body_alignment(_latest_body_alignment),
 		"day_summary": day_summary,
+		"behavior_evidence": _behavior_evidence_array(BEHAVIOR_EVIDENCE_CAP),
 		"snapshots": _reflection_snapshot_selection(NIGHT_REFLECTION_SNAPSHOT_CAP),
 		"recent_events": ari_memory.get_recent_events(NIGHT_REFLECTION_EVENT_CAP),
 		"scribe_notes": _recent_scribe_notes(NIGHT_REFLECTION_SCRIBE_CAP),
@@ -1787,6 +2120,8 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 	var candidate_lessons: Array[String] = []
 	var recommended_priority_hints: Array[String] = []
 	var evidence_snapshot_ids: Array[String] = []
+	var behavior_patterns: Array[String] = []
+	var behavior_evidence: Array = []
 	var alignment_counts := {"aligned": 0, "supporting": 0, "mismatch": 0, "unknown": 0}
 	var current_understanding := _compact_ari_understanding(ari_understanding, 3)
 
@@ -1812,6 +2147,7 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 			elif relation == "mismatch":
 				_summary_append(plan_mismatches, alignment_line, 8)
 				_summary_append(misunderstood, "Ari's body did not match the active plan.", 8)
+		_collect_summary_behavior_evidence(snapshot.get("behavior_evidence", {}), behavior_evidence, behavior_patterns, evidence_snapshot_ids, what_changed, went_wrong, candidate_lessons)
 		var world_state = snapshot.get("world", {})
 		if typeof(world_state) != TYPE_DICTIONARY:
 			continue
@@ -1878,6 +2214,7 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 				_summary_append(prerequisite_progress, note_text if note_text != "" else "Ari made prerequisite progress toward the active plan.", 8)
 			elif change == "safety_substitution":
 				_summary_append(safety_substitutions, note_text if note_text != "" else "Ari chose a safer substitute under pressure.", 8)
+		_collect_summary_behavior_evidence(note.get("behavior_evidence", []), behavior_evidence, behavior_patterns, evidence_snapshot_ids, what_changed, went_wrong, candidate_lessons)
 		for blocker in _summary_string_array(note.get("resource_blockers", []), 5, 80):
 			_summary_append(resource_blockers, blocker, 8)
 		for mistake in _summary_string_array(note.get("mistake_candidates", []), 5, 140):
@@ -1909,6 +2246,7 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 		_summary_append(recommended_priority_hints, "build_storm_rod", 10)
 		if _array_text_contains_local(went_wrong, "wall") or _array_text_contains_local(plan_mismatches, "wall"):
 			_summary_append(misunderstood, "Ari treated flying danger like ground danger.", 8)
+	_collect_summary_behavior_evidence(_behavior_evidence_array(BEHAVIOR_EVIDENCE_CAP), behavior_evidence, behavior_patterns, evidence_snapshot_ids, what_changed, went_wrong, candidate_lessons)
 
 	return {
 		"schema": "ari.day_summary.v1",
@@ -1934,6 +2272,8 @@ func _build_day_summary(trigger: String, outcome: String) -> Dictionary:
 		"safety_substitutions": safety_substitutions,
 		"resource_blockers": resource_blockers,
 		"threats": threats,
+		"behavior_patterns": behavior_patterns,
+		"behavior_evidence": behavior_evidence,
 		"candidate_lessons": candidate_lessons,
 		"recommended_priority_hints": recommended_priority_hints,
 		"current_understanding": current_understanding,
@@ -2094,9 +2434,14 @@ func _build_strategy_packet(trigger: String = "") -> Dictionary:
 	for key in sign_priority_hints.keys():
 		priority_hints[str(key)] = maxf(float(priority_hints.get(str(key), 0.0)), float(sign_priority_hints[key]) * 0.5)
 	var doctrine_bias := _learned_doctrine_bias(doctrine_context)
+	var negative_doctrine_actions: Array[String] = []
 	if typeof(doctrine_bias) == TYPE_DICTIONARY:
 		for key in doctrine_bias.keys():
-			priority_hints[str(key)] = maxf(float(priority_hints.get(str(key), 0.0)), absf(float(doctrine_bias[key])))
+			var action_bias := clampf(float(doctrine_bias[key]), -1.0, 1.0)
+			if action_bias > 0.0:
+				priority_hints[str(key)] = maxf(float(priority_hints.get(str(key), 0.0)), action_bias)
+			elif action_bias < 0.0:
+				_summary_append(negative_doctrine_actions, "avoid " + str(key), 8)
 	var avoid_repeating: Array[String] = []
 	for item in summary.get("went_wrong", []):
 		_summary_append(avoid_repeating, str(item), 8)
@@ -2104,6 +2449,8 @@ func _build_strategy_packet(trigger: String = "") -> Dictionary:
 		_summary_append(avoid_repeating, str(item), 8)
 	for item in summary.get("plan_mismatches", []):
 		_summary_append(avoid_repeating, str(item), 8)
+	for item in negative_doctrine_actions:
+		_summary_append(avoid_repeating, item, 8)
 	var try_next: Array[String] = []
 	if priority_hints.has("build_storm_rod") or priority_hints.has("anti_air_defense"):
 		_summary_append(try_next, "build_storm_rod", 8)
@@ -2149,6 +2496,8 @@ func _build_strategy_packet(trigger: String = "") -> Dictionary:
 		"priority_hints": priority_hints,
 		"avoid_repeating": avoid_repeating,
 		"try_next": try_next,
+		"behavior_patterns": summary.get("behavior_patterns", []),
+		"behavior_evidence": summary.get("behavior_evidence", []),
 		"prerequisite_progress": summary.get("prerequisite_progress", []),
 		"safety_substitutions": summary.get("safety_substitutions", []),
 		"understanding": _compact_ari_understanding(ari_understanding, 4),
@@ -2172,6 +2521,7 @@ func _build_agent_plan_strategy_packet(trigger: String = "") -> Dictionary:
 		"priority_hints": _compact_priority_map(strategy.get("priority_hints", {}), 8),
 		"avoid_repeating": _summary_string_array(strategy.get("avoid_repeating", []), 4, 100),
 		"try_next": _summary_string_array(strategy.get("try_next", []), 5, 80),
+		"behavior_evidence": _behavior_evidence_compact_array(strategy.get("behavior_evidence", []), 2),
 		"prerequisite_progress": _summary_string_array(strategy.get("prerequisite_progress", []), 3, 100),
 		"safety_substitutions": _summary_string_array(strategy.get("safety_substitutions", []), 2, 100),
 		"understanding": _compact_ari_understanding(strategy.get("understanding", {}), 3),
@@ -2196,6 +2546,7 @@ func _compact_active_doctrines_for_plan(doctrines: Array, max_count: int) -> Arr
 			"when": doctrine.get("when", {}) if typeof(doctrine.get("when", {})) == TYPE_DICTIONARY else {},
 			"bias": _compact_priority_map(doctrine.get("bias", doctrine.get("priority_bias", {})), 6),
 			"plan": _compact_doctrine_plan(doctrine.get("plan", doctrine.get("plan_templates", [])), 3),
+			"control": _compact_doctrine_control(doctrine.get("control", {})),
 			"confidence": clampf(float(doctrine.get("confidence", 0.0)), 0.0, 1.0),
 			"source": _limit_inline(str(doctrine.get("source", "")), 60),
 			"origin": _limit_inline(str(doctrine.get("origin", "")), 60),
@@ -3526,6 +3877,18 @@ func _merge_signed_bias(target: Dictionary, source) -> void:
 
 
 func _doctrine_context() -> Dictionary:
+	var behavior_evidence := _behavior_evidence_array(BEHAVIOR_EVIDENCE_CAP)
+	var behavior_patterns: Array[String] = []
+	var danger_changed := false
+	for evidence in behavior_evidence:
+		if typeof(evidence) != TYPE_DICTIONARY:
+			continue
+		var pattern := str(evidence.get("primary_pattern", "")).strip_edges()
+		if pattern != "" and not behavior_patterns.has(pattern):
+			behavior_patterns.append(pattern)
+		var context = evidence.get("context", {})
+		if typeof(context) == TYPE_DICTIONARY and bool(context.get("nearest_danger_changed", false)):
+			danger_changed = true
 	return {
 		"day": day_night.day,
 		"phase": day_night.phase,
@@ -3533,6 +3896,9 @@ func _doctrine_context() -> Dictionary:
 		"known_enemy_types": _known_enemy_types(),
 		"ari_hp_ratio": _get_ari_hp_ratio(),
 		"recent_events": ari_memory.get_recent_events(30) if ari_memory != null and ari_memory.has_method("get_recent_events") else [],
+		"behavior_patterns": behavior_patterns,
+		"behavior_evidence": behavior_evidence,
+		"danger_changed": danger_changed,
 	}
 
 
@@ -5021,6 +5387,7 @@ func _record_agent_plan_created(trigger: String, plan_result: Dictionary) -> voi
 			"day": day_night.day,
 			"phase": day_night.phase,
 			"evidence_ids": evidence_ids,
+			"behavior_evidence": _behavior_evidence_array(2),
 			"scribe_note_ids": _recent_scribe_note_ids_for_evidence(evidence_ids, 6),
 			"summary_id": summary_id,
 			"reflection_id": reflection_id,
@@ -5225,6 +5592,9 @@ func _learning_trace_improvement_claim(trace: Dictionary, outcome_record: Dictio
 	var action_id := str(trace.get("later_action_id", outcome_record.get("action_id", ""))).strip_edges()
 	var outcome := str(outcome_record.get("outcome", "")).strip_edges()
 	if outcome == "action_completed":
+		for evidence in trace.get("behavior_evidence", []):
+			if typeof(evidence) == TYPE_DICTIONARY and str(evidence.get("primary_pattern", "")) == "repeated_action_switching":
+				return "Doctrine-influenced plan completed %s after prior repeated switching; this is plausible learning evidence, not survival proof by itself." % action_id
 		return "Doctrine-influenced plan completed %s; this is plausible learning evidence, not survival proof by itself." % action_id
 	if outcome == "":
 		outcome = "unknown_outcome"
@@ -5737,6 +6107,7 @@ func _build_agent_plan_payload(trigger: String) -> Dictionary:
 		},
 		"current_plan": _agent_current_plan_payload(),
 		"strategy_packet": _build_agent_plan_strategy_packet(trigger),
+		"behavior_evidence": _behavior_evidence_array(BEHAVIOR_EVIDENCE_CAP),
 		"active_doctrines": _compact_active_doctrines_for_plan(active_doctrines, 3),
 		"recent_outcomes": _agent_recent_outcomes(8),
 		"legal_actions": _current_agent_legal_actions_compact(),
@@ -6438,6 +6809,24 @@ func _compact_doctrine_plan(value, max_count: int) -> Array:
 		})
 		if result.size() >= max_count:
 			break
+	return result
+
+
+func _compact_doctrine_control(value) -> Dictionary:
+	var result := {}
+	if typeof(value) != TYPE_DICTIONARY:
+		return result
+	var anchor_kind := str(value.get("preferred_anchor_kind", "")).strip_edges()
+	if anchor_kind != "":
+		result["preferred_anchor_kind"] = _limit_inline(anchor_kind, 80)
+	if value.has("min_hold_seconds"):
+		result["min_hold_seconds"] = clampf(float(value.get("min_hold_seconds", 0.0)), 0.0, 120.0)
+	var avoid_actions := _summary_string_array(value.get("avoid_action_ids", []), 6, 80)
+	if not avoid_actions.is_empty():
+		result["avoid_action_ids"] = avoid_actions
+	var break_reasons := _summary_string_array(value.get("allowed_break_reasons", []), 6, 80)
+	if not break_reasons.is_empty():
+		result["allowed_break_reasons"] = break_reasons
 	return result
 
 

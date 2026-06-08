@@ -97,6 +97,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 		maxf(_hint(priority_hints, "stall_until_dawn"), _hint(priority_hints, "hide_until_dawn")),
 		maxf(_hint(priority_hints, "survive_until_morning"), _hint(priority_hints, "avoid_killing"))
 	)
+	var hold_best_defense_preference := _hint(priority_hints, "hold_best_defense")
 	var sign_food_preference := maxf(
 		_hint(priority_hints, "farm_food"),
 		maxf(_hint(priority_hints, "eat"), _hint(priority_hints, "eat_food"))
@@ -154,7 +155,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	var rest_preference := sign_rest_preference
 	var reflect_preference := sign_reflect_preference
 	var survival_needs_stable := hunger < 58.0 and stamina > 34.0 and fear < 70.0 and ari_hp_ratio > 0.45
-	var defensive_wait_preference := maxf(_hint(priority_hints, "defensive_wait"), maxf(cover_preference, _hint(priority_hints, "wait_or_idle")))
+	var defensive_wait_preference := maxf(maxf(_hint(priority_hints, "defensive_wait"), hold_best_defense_preference), maxf(cover_preference, _hint(priority_hints, "wait_or_idle")))
 	if runner_pressure > 0.0:
 		cover_preference = maxf(cover_preference, 0.34 + runner_pressure * 0.12)
 		aura_lure_preference = maxf(aura_lure_preference, 0.34 + runner_pressure * 0.14)
@@ -228,6 +229,8 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 	storm_preference = clampf(storm_preference + _bias_hint(lesson_bias, "build_storm_rod"), 0.0, 1.0)
 	rest_preference = clampf(rest_preference + _bias_hint(lesson_bias, "rest"), 0.0, 1.0)
 	reflect_preference = clampf(reflect_preference + _bias_hint(lesson_bias, "reflect_library"), 0.0, 1.0)
+	hold_best_defense_preference = clampf(hold_best_defense_preference + _bias_hint(lesson_bias, "hold_best_defense"), 0.0, 1.0)
+	defensive_wait_preference = maxf(defensive_wait_preference, hold_best_defense_preference)
 	if avoid_wall_preference > 0.55:
 		wall_preference = 0.0
 	var soft_sky_wall_distrust := avoid_wall_preference > 0.25 and avoid_wall_preference <= 0.55 and sign_storm_preference > 0.30
@@ -342,6 +345,11 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 
 	if active_enemy_count <= 0 and light_mud_control_plan and damaged_structure_count <= 0 and ari_hp_ratio < 0.84 and hunger < 62.0 and not night_close:
 		return _job("rest", "Light and slow mud are ready; recover before the next night")
+
+	if active_enemy_count <= 0 and repair_bench_preference > 0.22 and repair_bench_count < 1 and has_defenses and not night_close:
+		if stone < repair_bench_cost:
+			return _job("mine_stone", "Need stone for repair bench")
+		return _job("build_repair_bench", "Sign asks for repair tools" if sign_repair_bench_preference > 0.0 else "Build favors repair")
 
 	if active_enemy_count <= 0 and direct_cover_preference > 0.30 and wall_count > 0 and wall_count < desired_wall_count:
 		if stone < wall_cost:
@@ -491,7 +499,7 @@ func choose_daytime_job(context: Dictionary) -> Dictionary:
 			return _job("mine_stone", "Need stone for repairable walls")
 		return _job("build_wall", "Repair tools need walls to keep standing")
 
-	if repair_bench_preference > 0.22 and repair_bench_count < 1 and has_defenses and wall_count >= repair_wall_floor:
+	if repair_bench_preference > 0.22 and repair_bench_count < 1 and has_defenses:
 		if stone < repair_bench_cost:
 			return _job("mine_stone", "Need stone for repair bench")
 		return _job("build_repair_bench", "Sign asks for repair tools" if sign_repair_bench_preference > 0.0 else "Build favors repair")
@@ -632,6 +640,7 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 		return _job("wait_or_idle", "Night tactic inactive")
 
 	var priority_hints := _priority_hints(context)
+	var lesson_bias := _lesson_bias(context)
 	var enemy_type_counts := _enemy_type_counts(context)
 	var runner_pressure := clampf(float(int(enemy_type_counts.get("runner", 0))) / 2.0, 0.0, 1.0)
 	var brute_pressure := clampf(float(int(enemy_type_counts.get("brute", 0))), 0.0, 1.0)
@@ -663,6 +672,8 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 		maxf(_hint(priority_hints, "stall_until_dawn"), _hint(priority_hints, "hide_until_dawn")),
 		maxf(_hint(priority_hints, "survive_until_morning"), _hint(priority_hints, "avoid_killing"))
 	)
+	var hold_best_defense_preference := _hint(priority_hints, "hold_best_defense")
+	hold_best_defense_preference = clampf(hold_best_defense_preference + _bias_hint(lesson_bias, "hold_best_defense"), 0.0, 1.0)
 	var flee_preference := maxf(_hint(priority_hints, "flee"), _hint(priority_hints, "kite"))
 	var has_valid_cover := bool(context.get("has_valid_cover", int(context.get("wall_count", 0)) > 0))
 	var has_valid_aura := bool(context.get("has_valid_aura", int(context.get("aura_orb_count", 0)) > 0))
@@ -712,6 +723,7 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 	var wants_decoy := decoy_use_preference > 0.25
 	var wants_thorns := thorn_use_preference > 0.25
 	var wants_tower := tower_preference > 0.25
+	var wants_best_defense_hold := hold_best_defense_preference > 0.30
 	var ready_sky_tower_plan := storm_rod_count > 0 and has_valid_tower and maxf(tower_preference, _hint(priority_hints, "build_storm_rod")) > 0.25
 	var wants_dawn_survival := dawn_survival_preference > 0.30
 	var decoy_is_breaking := wants_decoy and has_valid_decoy_idol and decoy_idol_hp_ratio <= 0.45
@@ -723,6 +735,10 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 		var quiet_food_job := _job_from_grounded_plan_actions(context, true, ["eat", "eat_food"])
 		if not quiet_food_job.is_empty():
 			return quiet_food_job
+		if wants_best_defense_hold:
+			var hold_job := _best_defense_hold_job(has_valid_tower, has_valid_aura, has_valid_cover, has_valid_fear_lantern, has_valid_decoy_idol, has_valid_thorn_totem)
+			if not hold_job.is_empty():
+				return hold_job
 		if wants_lantern and has_valid_fear_lantern:
 			return _job("use_fear_lantern", "Night is quiet; hold the warm light before teeth arrive")
 		if wants_tower and has_valid_tower:
@@ -780,6 +796,10 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 		return _job("flee", "Enemies are too close; move")
 	if ready_sky_tower_plan:
 		return _job("use_tower", "Storm Rod is ready; keep tower range")
+	if wants_best_defense_hold:
+		var pressure_hold_job := _best_defense_hold_job(has_valid_tower, has_valid_aura, has_valid_cover, has_valid_fear_lantern, has_valid_decoy_idol, has_valid_thorn_totem)
+		if not pressure_hold_job.is_empty():
+			return pressure_hold_job
 	var grounded_job := _job_from_grounded_plan(context, true)
 	if not grounded_job.is_empty():
 		return grounded_job
@@ -854,6 +874,22 @@ func choose_night_tactic(context: Dictionary) -> Dictionary:
 	if has_valid_cover:
 		return _job("use_cover", "No clearer tactic; use the remaining cover")
 	return _job("wait_or_idle", "No night tactic")
+
+
+func _best_defense_hold_job(has_valid_tower: bool, has_valid_aura: bool, has_valid_cover: bool, has_valid_fear_lantern: bool, has_valid_decoy_idol: bool, has_valid_thorn_totem: bool) -> Dictionary:
+	if has_valid_tower:
+		return _job("use_tower", "Hold the safest known defense: tower range")
+	if has_valid_aura:
+		return _job("lure_to_aura", "Hold the safest known defense: the light")
+	if has_valid_cover:
+		return _job("use_cover", "Hold the safest known defense: cover")
+	if has_valid_fear_lantern:
+		return _job("use_fear_lantern", "Hold the safest known defense: warm light")
+	if has_valid_decoy_idol:
+		return _job("use_decoy_idol", "Hold the safest known defense: decoy ground")
+	if has_valid_thorn_totem:
+		return _job("use_thorns", "Hold the safest known defense: thorn ground")
+	return {}
 
 
 func _direct_fight_reason(explicit_fight_preference: float, sword_preference: float, regen_preference: float, armor_preference: float) -> String:

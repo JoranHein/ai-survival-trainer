@@ -41,6 +41,7 @@ const HINT_ORDER := [
 	"hide_until_dawn",
 	"avoid_killing",
 	"survive_until_morning",
+	"hold_best_defense",
 	"defensive_wait",
 ]
 
@@ -74,14 +75,15 @@ const KEYWORDS := {
 	"use_thorns": ["thorn", "thorns", "skin", "bite", "biting", "touch", "touching", "recoil", "punish", "punishes"],
 	"build_repair_bench": ["workbench", "bench", "tool", "tools", "fixer"],
 	"repair_structure": ["repair", "repairs", "fix", "fixing", "mend", "mending", "patch", "patched", "broken"],
-	"build_storm_rod": ["storm", "storms", "rod", "lightning", "thunder", "sky", "air", "above", "flying", "wing", "wings"],
+	"build_storm_rod": ["storm", "storms", "rod", "rods", "lightning", "thunder", "sky", "air", "above", "flying", "fly", "flies", "wing", "wings"],
 	"rest": ["rest", "sleep", "bed", "quiet", "calm", "heart", "tired", "heal", "safe", "safety", "breathe", "breath", "myself", "alone"],
 	"reflect_library": ["library", "book", "books", "read", "note", "notes", "remember", "lesson", "learn", "think", "mistake", "mistakes", "why"],
 	"stall_until_dawn": ["stall", "delay", "wait", "morning", "dawn", "sunrise", "survive"],
 	"hide_until_dawn": ["hide", "hiding", "morning", "dawn", "sunrise", "survive"],
 	"avoid_killing": ["avoid", "hide", "wait", "survive", "morning", "dawn"],
 	"survive_until_morning": ["survive", "morning", "dawn", "sunrise", "daylight"],
-	"defensive_wait": ["wait", "hide", "safe", "safety"],
+	"hold_best_defense": ["safest", "defense", "defenses", "stay", "near", "hold", "anchor"],
+	"defensive_wait": ["wait", "hide", "safe", "safety", "stay"],
 }
 
 
@@ -125,6 +127,7 @@ const HINT_LABELS := {
 	"hide_until_dawn": "hide until dawn",
 	"avoid_killing": "avoid killing",
 	"survive_until_morning": "survive morning",
+	"hold_best_defense": "safe anchor",
 	"defensive_wait": "safety",
 }
 
@@ -344,7 +347,8 @@ func _apply_phrase_overrides(hints: Dictionary, tokens: PackedStringArray) -> vo
 	var wall_language := _has_any_token(tokens, ["wall", "walls", "fortress"])
 	var explicit_wall_negation := wall_language and _has_negation_token(tokens) and _has_any_token(tokens, ["build", "make", "hide", "behind", "cover", "use"])
 	var bare_no_wall_alternative := tokens.has("no") and wall_language and _has_any_token(tokens, ["only", "instead", "without", "light", "circle", "orb", "trap", "tower", "storm", "bow"]) and not _has_any_token(tokens, ["yet", "first"])
-	if explicit_wall_negation or bare_no_wall_alternative:
+	var instead_of_walls_alternative := wall_language and tokens.has("instead") and _has_any_token(tokens, ["light", "circle", "orb", "trap", "tower", "storm", "rod", "rods", "bow", "mud", "tar"])
+	if explicit_wall_negation or bare_no_wall_alternative or instead_of_walls_alternative:
 		hints["wall"] = 0.0
 		hints["avoid_build_wall"] = maxf(float(hints.get("avoid_build_wall", 0.0)), 0.90)
 		hints["use_existing_wall"] = minf(float(hints.get("use_existing_wall", 0.0)), 0.20)
@@ -356,6 +360,8 @@ func _apply_phrase_overrides(hints: Dictionary, tokens: PackedStringArray) -> vo
 			hints["build_trap"] = maxf(float(hints.get("build_trap", 0.0)), 0.75)
 		if _has_any_token(tokens, ["tower", "bow", "arrow", "arrows", "height"]):
 			hints["build_tower"] = maxf(float(hints.get("build_tower", 0.0)), 0.70)
+		if _has_any_token(tokens, ["storm", "rod", "rods", "sky", "air", "fly", "flies", "flying", "wing", "wings"]):
+			hints["build_storm_rod"] = maxf(float(hints.get("build_storm_rod", 0.0)), 0.86)
 		if not _has_any_token(tokens, ["mine", "mining", "rock", "rocks"]):
 			hints["mining"] = minf(float(hints.get("mining", 0.0)), 0.25)
 
@@ -445,7 +451,14 @@ func _apply_phrase_overrides(hints: Dictionary, tokens: PackedStringArray) -> vo
 		hints["build_decoy_idol"] = maxf(float(hints.get("build_decoy_idol", 0.0)), 0.82)
 		hints["use_decoy_idol"] = maxf(float(hints.get("use_decoy_idol", 0.0)), 0.74)
 
-	var sky_language := _has_any_token(tokens, ["wing", "wings", "flying", "sky", "air"])
+	var stable_anchor_language := _has_any_token(tokens, ["stay", "hold", "near", "safest", "safe", "safety", "defense", "defenses"]) and _has_any_token(tokens, ["stay", "hold", "near", "safest", "defense", "defenses"])
+	var no_back_and_forth := _has_any_token(tokens, ["back", "forth", "switch", "switching", "wander", "wandering"]) and _has_negation_token(tokens)
+	if stable_anchor_language or no_back_and_forth:
+		hints["hold_best_defense"] = maxf(float(hints.get("hold_best_defense", 0.0)), 0.82 if stable_anchor_language else 0.70)
+		hints["defensive_wait"] = maxf(float(hints.get("defensive_wait", 0.0)), 0.76)
+		hints["use_cover"] = maxf(float(hints.get("use_cover", 0.0)), 0.42)
+
+	var sky_language := _has_any_token(tokens, ["wing", "wings", "flying", "fly", "flies", "sky", "air"])
 	if not sky_language:
 		return
 	hints["build_storm_rod"] = maxf(float(hints.get("build_storm_rod", 0.0)), 0.85)
@@ -535,6 +548,8 @@ func _build_interpretation_text(hints: Dictionary) -> String:
 			return "Ari reads the goal as lasting until dawn, not winning the night."
 		"avoid_killing":
 			return "Ari reads survival as avoiding unnecessary fights."
+		"hold_best_defense":
+			return "Ari reads the sign as choosing one safe defense and staying with it."
 		"defensive_wait":
 			return "Ari reads safety and wants to stay near defenses."
 	return "Ari can read the words, but not a useful plan yet."
@@ -630,6 +645,8 @@ func _apply_run_build_to_hints(hints: Dictionary, run_build) -> void:
 		hints["hide_until_dawn"] = float(hints.get("hide_until_dawn", 0.0)) + movement * 0.12 + fear_control * 0.10
 	if float(hints.get("survive_until_morning", 0.0)) > 0.0:
 		hints["survive_until_morning"] = float(hints.get("survive_until_morning", 0.0)) + defense * 0.08 + fear_control * 0.10
+	if float(hints.get("hold_best_defense", 0.0)) > 0.0:
+		hints["hold_best_defense"] = float(hints.get("hold_best_defense", 0.0)) + defense * 0.12 + fear_control * 0.06
 
 	for hint_name in HINT_ORDER:
 		var hint_key := str(hint_name)
@@ -688,7 +705,7 @@ func _calculate_resonance(hints: Dictionary, run_build, sign_strength: float) ->
 			value += _build_strength(run_build, "armor") * 0.18 + _build_strength(run_build, "defense") * 0.10
 		"rely_on_regen", "regen_on_kill":
 			value += _build_strength(run_build, "regeneration") * 0.18
-		"wall", "defensive_wait":
+		"wall", "hold_best_defense", "defensive_wait":
 			value += _build_strength(run_build, "building") * 0.12 + _build_strength(run_build, "defense") * 0.06
 		"aura_orb":
 			value += _build_strength(run_build, "warding") * 0.16
@@ -808,8 +825,8 @@ func _job_matches_hint(hint_name: String, current_job: String) -> bool:
 			return current_job == "rest"
 		"reflect_library":
 			return current_job == "reflect_library"
-		"defensive_wait":
-			return current_job == "wait_or_idle"
+		"hold_best_defense", "defensive_wait":
+			return current_job == "wait_or_idle" or current_job == "use_cover" or current_job == "use_tower" or current_job == "lure_to_aura" or current_job == "use_fear_lantern"
 	return false
 
 

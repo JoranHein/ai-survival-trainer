@@ -41,6 +41,8 @@ func _run() -> void:
 	_test_wall_failure_lesson_drives_repair_support()
 	_test_ground_grab_sign_prefers_tar_pit()
 	_test_repair_tools_sign_builds_bench_before_damage()
+	_test_plain_anti_air_instead_of_walls_avoids_wall_habit()
+	_test_stay_near_safest_defense_holds_existing_anchor()
 	_test_agent_grounded_plan_drives_day_job()
 	_test_agent_build_tower_plan_can_add_redundancy()
 	_test_agent_aura_plan_can_add_redundancy()
@@ -1251,9 +1253,10 @@ func _test_ground_grab_sign_prefers_tar_pit() -> void:
 func _test_repair_tools_sign_builds_bench_before_damage() -> void:
 	var sign_mind = SignMindScript.new()
 	var ari_mind = AriMindScript.new()
-	var interpretation: Dictionary = sign_mind.interpret_sign("build tools so broken walls can stand again", {"points": {"building": 6, "defense": 4}})
+	var interpretation: Dictionary = sign_mind.interpret_sign("build repair tools and fix damaged defenses before fighting", {"points": {"building": 6, "defense": 4}})
 	var hints: Dictionary = interpretation.get("priority_hints", {})
 	_assert(float(hints.get("build_repair_bench", 0.0)) > 0.25, "repair-tools signs should create a repair bench hint")
+	_assert(float(hints.get("repair_structure", 0.0)) > 0.25, "repair-tools signs should create a repair structure hint")
 	var decision := ari_mind.choose_daytime_job(_base_mind_context({
 		"wall_count": 1,
 		"stone": 20,
@@ -1262,7 +1265,7 @@ func _test_repair_tools_sign_builds_bench_before_damage() -> void:
 		"priority_hints": hints,
 		"run_build": {"points": {"building": 6, "defense": 4}},
 	}))
-	_assert(decision.get("job", "") == "build_wall", "repair-tools signs should build enough walls before repair support")
+	_assert(decision.get("job", "") == "build_repair_bench", "plain repair-tools signs should build repair support before adding unnecessary extra walls; got %s because %s" % [str(decision.get("job", "")), str(decision.get("reason", ""))])
 	var bench_decision := ari_mind.choose_daytime_job(_base_mind_context({
 		"wall_count": 2,
 		"stone": 20,
@@ -1271,7 +1274,7 @@ func _test_repair_tools_sign_builds_bench_before_damage() -> void:
 		"priority_hints": hints,
 		"run_build": {"points": {"building": 6, "defense": 4}},
 	}))
-	_assert(bench_decision.get("job", "") == "build_repair_bench", "repair-tools signs should build a repair bench after enough walls exist")
+	_assert(bench_decision.get("job", "") == "build_repair_bench", "repair-tools signs should build a repair bench after enough walls exist; got %s because %s" % [str(bench_decision.get("job", "")), str(bench_decision.get("reason", ""))])
 	var close_runner_decision := ari_mind.choose_night_tactic(_base_mind_context({
 		"is_night": true,
 		"phase": "night",
@@ -1288,6 +1291,67 @@ func _test_repair_tools_sign_builds_bench_before_damage() -> void:
 		"current_job": "use_cover",
 	}))
 	_assert(close_runner_decision.get("job", "") == "use_cover", "repair-tools Ari should hold prepared wall cover against close runners instead of fleeing into open ground")
+	sign_mind.free()
+	ari_mind.free()
+
+
+func _test_plain_anti_air_instead_of_walls_avoids_wall_habit() -> void:
+	var sign_mind = SignMindScript.new()
+	var ari_mind = AriMindScript.new()
+	var interpretation: Dictionary = sign_mind.interpret_sign("if enemies fly, build storm rods instead of walls", {"points": {"building": 5, "warding": 4}})
+	var hints: Dictionary = interpretation.get("priority_hints", {})
+	_assert(float(hints.get("build_storm_rod", 0.0)) >= 0.75, "plain anti-air signs should strongly prefer Storm Rod")
+	_assert(float(hints.get("avoid_build_wall", 0.0)) >= 0.70, "instead-of-walls language should become a strong general wall avoidance preference")
+	_assert(float(hints.get("wall", 0.0)) <= 0.15, "instead-of-walls language should not keep ordinary walls as the main plan")
+	var decision := ari_mind.choose_daytime_job(_base_mind_context({
+		"wall_count": 0,
+		"stone": 20,
+		"enemy_type_counts": {"flying": 1},
+		"priority_hints": hints,
+		"run_build": {"points": {"building": 5, "warding": 4}},
+	}))
+	_assert(decision.get("job", "") == "build_storm_rod", "anti-air instead-of-walls plans should build Storm Rod before ordinary wall cover when it is affordable")
+	sign_mind.free()
+	ari_mind.free()
+
+
+func _test_stay_near_safest_defense_holds_existing_anchor() -> void:
+	var sign_mind = SignMindScript.new()
+	var ari_mind = AriMindScript.new()
+	var interpretation: Dictionary = sign_mind.interpret_sign("choose the safest defense and stay near it, do not run back and forth", {"points": {"building": 4, "defense": 5}})
+	var hints: Dictionary = interpretation.get("priority_hints", {})
+	_assert(float(hints.get("hold_best_defense", 0.0)) >= 0.70, "stay-near-safest-defense language should create a general hold-best-defense hint")
+	_assert(float(hints.get("defensive_wait", 0.0)) >= 0.70, "do-not-run-back-and-forth language should strengthen defensive waiting")
+	var quiet_night := ari_mind.choose_night_tactic(_base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 0,
+		"wall_count": 1,
+		"aura_orb_count": 1,
+		"bow_tower_count": 1,
+		"has_valid_cover": true,
+		"has_valid_aura": true,
+		"has_valid_tower": true,
+		"priority_hints": hints,
+		"current_job": "use_tower",
+	}))
+	_assert(quiet_night.get("job", "") == "use_tower", "safe-defense hold plans should keep the strongest existing anchor on quiet nights instead of idling")
+	var pressured_night := ari_mind.choose_night_tactic(_base_mind_context({
+		"is_night": true,
+		"phase": "night",
+		"enemy_count": 2,
+		"enemy_type_counts": {"zombie": 2},
+		"nearest_enemy_distance": 95.0,
+		"wall_count": 1,
+		"aura_orb_count": 1,
+		"bow_tower_count": 1,
+		"has_valid_cover": true,
+		"has_valid_aura": true,
+		"has_valid_tower": true,
+		"priority_hints": hints,
+		"current_job": "use_tower",
+	}))
+	_assert(pressured_night.get("job", "") == "use_tower", "safe-defense hold plans should keep the chosen tower anchor while danger is not close enough to force a safety override")
 	sign_mind.free()
 	ari_mind.free()
 

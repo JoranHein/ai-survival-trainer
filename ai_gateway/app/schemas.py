@@ -63,12 +63,14 @@ ALLOWED_PRIORITY_KEYS = {
     "aura_orb",
     "combat_training",
     "range",
+    "hold_best_defense",
     "defensive_wait",
 }
 
 MAX_GROUNDED_PLAN_ITEMS = 4
 AGENT_PLAN_SCHEMA = "ari.agent.plan.v1"
 SCRIBE_NOTE_SCHEMA = "ari.scribe.note.v2"
+BEHAVIOR_EVIDENCE_SCHEMA = "ari.behavior_evidence.v1"
 PREDICTION_SCHEMA = "ari.prediction.v1"
 MAX_AGENT_PLAN_STEPS = 4
 MAX_BELIEF_UPDATES = 6
@@ -78,8 +80,34 @@ MAX_SCRIBE_ACTIONS = 4
 MAX_SCRIBE_DANGERS = 4
 MAX_SCRIBE_WORLD_CHANGES = 6
 MAX_SCRIBE_DECISION_ITEMS = 5
+MAX_BEHAVIOR_EVIDENCE_ITEMS = 4
 MAX_REFLECTION_DOCTRINES = 5
 MAX_REFLECTION_LIST_ITEMS = 8
+MAX_DOCTRINE_CONTROL_ACTIONS = 6
+MAX_DOCTRINE_CONTROL_BREAK_REASONS = 6
+ALLOWED_DOCTRINE_ANCHOR_KINDS = {
+    "safest_defense",
+    "current_anchor",
+    "tower",
+    "aura",
+    "cover",
+    "wall",
+    "storm_rod",
+    "fear_lantern",
+    "decoy_idol",
+    "thorn_totem",
+    "repair_target",
+}
+ALLOWED_DOCTRINE_BREAK_REASONS = {
+    "danger_changed",
+    "anchor_destroyed",
+    "low_hp",
+    "enemy_too_close",
+    "anchor_invalid",
+    "plan_completed",
+    "resource_blocked",
+    "required_resource_missing",
+}
 INTERNAL_SCRIBE_EVENT_TYPES = {
     "agent_plan_created",
     "learning_trace_created",
@@ -235,6 +263,7 @@ class AgentPlanRequest(TolerantRequestModel):
     perception: dict[str, Any] = Field(default_factory=dict)
     current_plan: dict[str, Any] = Field(default_factory=dict)
     strategy_packet: dict[str, Any] = Field(default_factory=dict)
+    behavior_evidence: list[dict[str, Any]] = Field(default_factory=list)
     action_control_panel: dict[str, Any] = Field(default_factory=dict)
     active_doctrines: list[dict[str, Any]] = Field(default_factory=list)
     active_doctrine_plan: list[dict[str, Any]] = Field(default_factory=list)
@@ -878,7 +907,66 @@ def sanitize_scribe_response(raw: dict[str, Any], fallback: dict[str, Any]) -> d
             12,
             120,
         ),
+        "behavior_evidence": sanitize_behavior_evidence_list(
+            data.get("behavior_evidence", fallback.get("behavior_evidence", [])),
+            3,
+        ),
     }
+
+
+def sanitize_behavior_evidence_list(raw_items: Any, max_count: int = MAX_BEHAVIOR_EVIDENCE_ITEMS) -> list[dict[str, Any]]:
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+    if not isinstance(raw_items, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        pattern = clean_text(item.get("primary_pattern", ""), 80)
+        if not pattern:
+            continue
+        context = item.get("context", {})
+        safe_context: dict[str, Any] = {}
+        if isinstance(context, dict):
+            safe_context = {
+                "phase": clean_text(context.get("phase", ""), 40),
+                "enemy_count_before": max(0, int(_float_value(context.get("enemy_count_before", 0)))),
+                "enemy_count_after": max(0, int(_float_value(context.get("enemy_count_after", 0)))),
+                "nearest_danger_changed": bool(context.get("nearest_danger_changed", False)),
+                "active_plan_changed": bool(context.get("active_plan_changed", False)),
+            }
+        progress = item.get("progress_delta", {})
+        safe_progress: dict[str, int] = {}
+        if isinstance(progress, dict):
+            safe_progress = {
+                "structures": int(_float_value(progress.get("structures", 0))),
+                "stone": int(_float_value(progress.get("stone", 0))),
+                "repairs": int(_float_value(progress.get("repairs", 0))),
+                "kills": int(_float_value(progress.get("kills", 0))),
+                "hp": int(_float_value(progress.get("hp", 0))),
+            }
+        result.append(
+            {
+                "schema": BEHAVIOR_EVIDENCE_SCHEMA,
+                "window_seconds": max(0.0, min(_float_value(item.get("window_seconds", 0.0)), 120.0)),
+                "primary_pattern": pattern,
+                "actions_seen": sanitize_string_list(item.get("actions_seen", []), 8, 80),
+                "transition_count": max(0, int(_float_value(item.get("transition_count", 0)))),
+                "completion_count": max(0, int(_float_value(item.get("completion_count", 0)))),
+                "blocked_count": max(0, int(_float_value(item.get("blocked_count", 0)))),
+                "abandoned_count": max(0, int(_float_value(item.get("abandoned_count", 0)))),
+                "anchors_seen": sanitize_string_list(item.get("anchors_seen", []), 8, 80),
+                "anchor_transition_count": max(0, int(_float_value(item.get("anchor_transition_count", 0)))),
+                "progress_delta": safe_progress,
+                "context": safe_context,
+                "evidence_ids": sanitize_string_list(item.get("evidence_ids", []), 12, 120),
+                "neutral_summary": clean_text(item.get("neutral_summary", ""), 220),
+            }
+        )
+        if len(result) >= max_count:
+            break
+    return result
 
 
 def sanitize_scribe_plan_alignment(value: Any) -> str:
@@ -926,6 +1014,7 @@ def fallback_scribe_response(payload: dict[str, Any], failure_reason: str = "loc
         else:
             planned_action = clean_text(raw_next_action, 80)
     snapshot_rows = [item for item in snapshots if isinstance(item, dict)] if isinstance(snapshots, list) else []
+    behavior_evidence = sanitize_behavior_evidence_list(payload.get("behavior_evidence", []), 3)
     if snapshot_rows:
         latest = snapshot_rows[-1]
         if isinstance(latest, dict):
@@ -970,6 +1059,9 @@ def fallback_scribe_response(payload: dict[str, Any], failure_reason: str = "loc
                 resource_blockers.append("low_stone")
             recent_damage = max(recent_damage, _float_value(world.get("recent_damage", 0.0)))
             world_changes = sanitize_string_list(world.get("notable_changes", []), MAX_SCRIBE_WORLD_CHANGES, 80)
+        for snapshot in snapshot_rows:
+            behavior_evidence.extend(sanitize_behavior_evidence_list(snapshot.get("behavior_evidence", []), 3))
+            behavior_evidence = behavior_evidence[:3]
         _preserve_recent_flying_scribe_evidence(snapshot_rows, facts, world_changes, priority_hints, evidence_ids)
     plan_relation = _scribe_plan_relation(current_action, current_reason, planned_action)
     plan_body_mismatch = plan_relation == "mismatch"
@@ -1011,6 +1103,22 @@ def fallback_scribe_response(payload: dict[str, Any], failure_reason: str = "loc
     mistake_candidates: list[str] = []
     opportunity_candidates: list[str] = []
     lesson_candidates: list[str] = []
+    for evidence in behavior_evidence:
+        pattern = clean_text(evidence.get("primary_pattern", ""), 80)
+        neutral = clean_text(evidence.get("neutral_summary", ""), 220)
+        if neutral and neutral not in facts:
+            facts.append(neutral)
+        if pattern:
+            if pattern not in world_changes:
+                world_changes.append(pattern)
+            if pattern == "repeated_action_switching" and "repeated switching happened without progress" not in mistake_candidates:
+                mistake_candidates.append("repeated switching happened without progress")
+            review_lesson = "review whether %s helped survival" % pattern
+            if review_lesson not in lesson_candidates:
+                lesson_candidates.append(review_lesson)
+        for evidence_id in sanitize_string_list(evidence.get("evidence_ids", []), 12, 120):
+            if evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
     if plan_body_mismatch:
         mistake_candidates.append(
             "body action %s diverged from planned %s" % (
@@ -1061,6 +1169,7 @@ def fallback_scribe_response(payload: dict[str, Any], failure_reason: str = "loc
         "failure_reason": clean_text(failure_reason, 64),
         "origin": "deterministic_scribe" if failure_reason == "deterministic_scribe" else "fallback_scribe",
         "evidence_ids": evidence_ids,
+        "behavior_evidence": behavior_evidence,
     }
     return sanitize_scribe_response(raw, raw)
 
@@ -1735,6 +1844,7 @@ def normalize_background_job_model_result(raw: dict[str, Any], request: Backgrou
         "avoid_repeating": data.get("avoid", data.get("av", source_strategy.get("avoid_repeating", []))),
         "try_next": data.get("try", data.get("next", source_strategy.get("try_next", []))),
         "evidence": data.get("e", data.get("evidence", source_strategy.get("evidence", []))),
+        "behavior_evidence": data.get("behavior_evidence", source_strategy.get("behavior_evidence", [])),
         "confidence": data.get("c", data.get("confidence", source_strategy.get("confidence", 0.45))),
     }
     return {
@@ -1811,6 +1921,10 @@ def sanitize_strategy_packet(raw: Any, fallback: dict[str, Any] | None = None) -
             data.get("evidence", fallback.get("evidence", [])),
             MAX_STRATEGY_EVIDENCE_ITEMS,
             180,
+        ),
+        "behavior_evidence": sanitize_behavior_evidence_list(
+            data.get("behavior_evidence", fallback.get("behavior_evidence", [])),
+            3,
         ),
         "confidence": clamp01(data.get("confidence", fallback.get("confidence", 0.35))),
     }
@@ -2272,13 +2386,14 @@ def sanitize_doctrine(raw_doctrine: dict[str, Any]) -> dict[str, Any]:
         return {}
     bias = sanitize_compact_priority_hints(raw_doctrine.get("bias", raw_doctrine.get("priority_bias", {})), signed=True)
     plan = sanitize_doctrine_plan(raw_doctrine.get("plan", []))
-    if not bias and not plan:
+    control = sanitize_doctrine_control(raw_doctrine.get("control", {}))
+    if not bias and not plan and not control:
         return {}
     raw_id = raw_doctrine.get("id", raw_doctrine.get("title", "doctrine"))
     doctrine_id = clean_text(normalize_key(str(raw_id)), 80)
     if not doctrine_id:
         return {}
-    return {
+    result = {
         "id": doctrine_id,
         "summary": clean_text(raw_doctrine.get("summary", raw_doctrine.get("hypothesis", raw_id)), 240),
         "when": when,
@@ -2286,6 +2401,9 @@ def sanitize_doctrine(raw_doctrine: dict[str, Any]) -> dict[str, Any]:
         "plan": plan,
         "confidence": clamp01(raw_doctrine.get("confidence", 1.0)),
     }
+    if control:
+        result["control"] = control
+    return result
 
 
 def sanitize_doctrine_when(raw_when: Any) -> dict[str, Any]:
@@ -2318,6 +2436,11 @@ def sanitize_doctrine_when(raw_when: Any) -> dict[str, Any]:
             destroyed_text = clean_text(destroyed, 60)
             if destroyed_text:
                 result["structure_destroyed"] = destroyed_text
+    behavior_pattern = clean_text(raw_when.get("behavior_pattern", raw_when.get("pattern", "")), 80)
+    if behavior_pattern:
+        result["behavior_pattern"] = behavior_pattern
+    if "danger_changed" in raw_when:
+        result["danger_changed"] = bool(raw_when.get("danger_changed", False))
     return result
 
 
@@ -2345,6 +2468,52 @@ def sanitize_doctrine_plan(raw_plan: Any) -> list[dict[str, Any]]:
         seen.add(affordance_id)
         if len(result) >= MAX_AGENT_PLAN_STEPS:
             break
+    return result
+
+
+def sanitize_doctrine_control(raw_control: Any) -> dict[str, Any]:
+    if not isinstance(raw_control, dict):
+        return {}
+    result: dict[str, Any] = {}
+    anchor = clean_text(
+        normalize_key(
+            str(
+                raw_control.get(
+                    "preferred_anchor_kind",
+                    raw_control.get("anchor_kind", raw_control.get("preferred_anchor", "")),
+                )
+            )
+        ),
+        80,
+    )
+    if anchor in ALLOWED_DOCTRINE_ANCHOR_KINDS:
+        result["preferred_anchor_kind"] = anchor
+    if "min_hold_seconds" in raw_control:
+        result["min_hold_seconds"] = max(3.0, min(45.0, _float_value(raw_control.get("min_hold_seconds", 0.0))))
+    avoid_actions: list[str] = []
+    raw_avoid_actions = raw_control.get("avoid_action_ids", raw_control.get("avoid_actions", []))
+    if isinstance(raw_avoid_actions, list):
+        for item in raw_avoid_actions:
+            action_id = clean_text(normalize_key(str(item)), 80)
+            if action_id not in ALLOWED_PRIORITY_KEYS or action_id in avoid_actions:
+                continue
+            avoid_actions.append(action_id)
+            if len(avoid_actions) >= MAX_DOCTRINE_CONTROL_ACTIONS:
+                break
+    if avoid_actions:
+        result["avoid_action_ids"] = avoid_actions
+    break_reasons: list[str] = []
+    raw_break_reasons = raw_control.get("allowed_break_reasons", raw_control.get("break_reasons", []))
+    if isinstance(raw_break_reasons, list):
+        for item in raw_break_reasons:
+            reason_id = clean_text(normalize_key(str(item)), 80)
+            if reason_id not in ALLOWED_DOCTRINE_BREAK_REASONS or reason_id in break_reasons:
+                continue
+            break_reasons.append(reason_id)
+            if len(break_reasons) >= MAX_DOCTRINE_CONTROL_BREAK_REASONS:
+                break
+    if break_reasons:
+        result["allowed_break_reasons"] = break_reasons
     return result
 
 

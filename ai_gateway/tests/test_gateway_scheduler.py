@@ -10,12 +10,12 @@ from app.model_client import Settings
 from app.schemas import AgentPlanRequest, PredictionRequest
 
 
-def test_live_prediction_preempts_planner_that_arrived_first(monkeypatch):
+def test_planner_that_arrived_first_is_not_preempted_by_prediction(monkeypatch):
     async def fake_call_plan_model(_request, _settings):
         await asyncio.sleep(0.20)
         return {
             "g": "slow plan",
-            "theory": "Slow planning should not block live prediction.",
+            "theory": "Slow planning should keep the foreground lane.",
             "plan": ["build_tower"],
             "next": "build_tower",
             "fb": "use_cover",
@@ -30,7 +30,7 @@ def test_live_prediction_preempts_planner_that_arrived_first(monkeypatch):
             "r": "high",
             "a": "build_storm_rod",
             "u": 0.9,
-            "why": "Live flying danger needs a sky answer now.",
+            "why": "Live prediction is low-priority when planning is pending.",
             "h": {"build_storm_rod": 0.9},
             "c": 0.8,
             "ctx": request.context_hash,
@@ -56,11 +56,10 @@ def test_live_prediction_preempts_planner_that_arrived_first(monkeypatch):
     finally:
         _reset_scheduler_state()
 
-    assert elapsed < 0.15
-    assert prediction["source"] == "remote_server"
-    assert prediction["next_action_bias"]["action_id"] == "build_storm_rod"
-    assert plan["source"] == "local_fallback"
-    assert plan["failure_reason"] == "prediction_pending"
+    assert elapsed < 0.08
+    assert prediction["source"] == "local_fallback"
+    assert prediction["failure_reason"] == "foreground_busy"
+    assert plan["source"] == "remote_server"
 
 
 def test_live_prediction_does_not_wait_for_background_already_running(monkeypatch):
@@ -99,12 +98,12 @@ def test_live_prediction_does_not_wait_for_background_already_running(monkeypatc
         _reset_scheduler_state()
 
     assert elapsed < 0.08
-    assert prediction["source"] == "remote_server"
-    assert prediction["next_action_bias"]["action_id"] == "build_storm_rod"
+    assert prediction["source"] == "local_fallback"
+    assert prediction["failure_reason"] == "foreground_busy"
     assert background["raw"]["status"] == "ok"
 
 
-def test_live_prediction_does_not_wait_for_planner_already_running(monkeypatch):
+def test_live_prediction_falls_back_when_planner_already_running(monkeypatch):
     async def fake_call_plan_model(_request, _settings):
         await asyncio.sleep(0.20)
         return {
@@ -152,8 +151,8 @@ def test_live_prediction_does_not_wait_for_planner_already_running(monkeypatch):
         _reset_scheduler_state()
 
     assert elapsed < 0.08
-    assert prediction["source"] == "remote_server"
-    assert prediction["next_action_bias"]["action_id"] == "build_storm_rod"
+    assert prediction["source"] == "local_fallback"
+    assert prediction["failure_reason"] == "foreground_busy"
     assert plan["source"] == "remote_server"
 
 

@@ -213,15 +213,20 @@ async def _run_foreground_generation(call):
 
 
 async def _run_prediction_generation(call):
-    global _FOREGROUND_PENDING, _PREDICTION_PENDING
-    _FOREGROUND_PENDING += 1
+    global _PREDICTION_PENDING
+    foreground_lock = _generation_lock()
+    if _FOREGROUND_PENDING > 0 or foreground_lock.locked():
+        raise RuntimeError("foreground_busy")
     _PREDICTION_PENDING += 1
     try:
+        if _FOREGROUND_PENDING > 0 or foreground_lock.locked():
+            raise RuntimeError("foreground_busy")
         async with _prediction_generation_lock():
+            if _FOREGROUND_PENDING > 0 or foreground_lock.locked():
+                raise RuntimeError("foreground_busy")
             return await call()
     finally:
         _PREDICTION_PENDING = max(0, _PREDICTION_PENDING - 1)
-        _FOREGROUND_PENDING = max(0, _FOREGROUND_PENDING - 1)
 
 
 async def _run_yielding_foreground_generation(call):
@@ -230,11 +235,7 @@ async def _run_yielding_foreground_generation(call):
     try:
         if FOREGROUND_PRIORITY_DELAY_SECONDS > 0.0:
             await asyncio.sleep(FOREGROUND_PRIORITY_DELAY_SECONDS)
-        if _PREDICTION_PENDING > 0:
-            raise RuntimeError("prediction_pending")
         async with _generation_lock():
-            if _PREDICTION_PENDING > 0:
-                raise RuntimeError("prediction_pending")
             return await call()
     finally:
         _FOREGROUND_PENDING = max(0, _FOREGROUND_PENDING - 1)
@@ -353,8 +354,9 @@ async def fast_prediction(
     try:
         model_result = await _run_prediction_generation(lambda: call_prediction_model(request, settings))
         return sanitize_prediction_response(model_result, fallback, request)
-    except Exception:
-        return fallback_prediction_response(request, "model_failed")
+    except Exception as exc:
+        failure_reason = "foreground_busy" if str(exc) == "foreground_busy" else "model_failed"
+        return fallback_prediction_response(request, failure_reason)
 
 
 @app.post("/scribe", response_model=BridgeRawResponse)

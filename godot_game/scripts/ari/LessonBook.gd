@@ -55,6 +55,7 @@ func _validate_note(note: Dictionary) -> Dictionary:
 		"failure_reason": _limit_text(str(note.get("failure_reason", "")), 64),
 		"origin": _limit_text(str(note.get("origin", "")), 80),
 		"evidence_ids": _string_array(note.get("evidence_ids", note.get("evidence_snapshot_ids", [])), 20, 120),
+		"behavior_evidence": _behavior_evidence_array(note.get("behavior_evidence", []), 3),
 	}
 
 
@@ -89,6 +90,48 @@ func _string_array(value, max_count: int, max_length: int) -> Array:
 func _doctrines(value) -> Array:
 	var doctrine_validator := AriDoctrine.new()
 	return doctrine_validator.add_doctrines(value)
+
+
+func _behavior_evidence_array(value, max_count: int) -> Array:
+	var result := []
+	if typeof(value) == TYPE_DICTIONARY:
+		var evidence := _validate_behavior_evidence(value)
+		if not evidence.is_empty():
+			result.append(evidence)
+		return result
+	if typeof(value) != TYPE_ARRAY:
+		return result
+	for item in value:
+		var evidence := _validate_behavior_evidence(item)
+		if not evidence.is_empty():
+			result.append(evidence)
+		if result.size() >= max_count:
+			break
+	return result
+
+
+func _validate_behavior_evidence(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {}
+	var pattern := _limit_text(str(value.get("primary_pattern", "")), 80)
+	if pattern == "":
+		return {}
+	var progress = value.get("progress_delta", {})
+	var context = value.get("context", {})
+	return {
+		"schema": "ari.behavior_evidence.v1",
+		"window_seconds": clampf(float(value.get("window_seconds", 0.0)), 0.0, 120.0),
+		"primary_pattern": pattern,
+		"actions_seen": _string_array(value.get("actions_seen", []), 8, 80),
+		"transition_count": max(0, int(value.get("transition_count", 0))),
+		"completion_count": max(0, int(value.get("completion_count", 0))),
+		"blocked_count": max(0, int(value.get("blocked_count", 0))),
+		"abandoned_count": max(0, int(value.get("abandoned_count", 0))),
+		"progress_delta": progress.duplicate(true) if typeof(progress) == TYPE_DICTIONARY else {},
+		"context": context.duplicate(true) if typeof(context) == TYPE_DICTIONARY else {},
+		"evidence_ids": _string_array(value.get("evidence_ids", []), 12, 120),
+		"neutral_summary": _limit_text(str(value.get("neutral_summary", "")), 220),
+	}
 
 
 func _copy_array(source: Array) -> Array:

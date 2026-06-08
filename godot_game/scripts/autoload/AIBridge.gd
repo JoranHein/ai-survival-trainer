@@ -99,6 +99,7 @@ const DEEP_PRIORITY_KEYS := [
 	"aura_orb",
 	"combat_training",
 	"range",
+	"hold_best_defense",
 	"defensive_wait",
 ]
 
@@ -513,7 +514,9 @@ func _parse_deep_interpretation_response(payload: Dictionary, result: int, respo
 	var parsed := _parse_json_dictionary(body.get_string_from_utf8())
 	if parsed.is_empty():
 		return _deep_fallback(payload, "parse", "parse")
-	return _validate_deep_interpretation(parsed, payload, true, "remote_server")
+	var source := _response_source(parsed, "remote_server")
+	var parsed_ok := _response_counts_as_remote_success(source)
+	return _validate_deep_interpretation(parsed, payload, parsed_ok, source)
 
 
 func _parse_agent_plan_response(payload: Dictionary, result: int, response_code: int, body: PackedByteArray) -> Dictionary:
@@ -526,7 +529,9 @@ func _parse_agent_plan_response(payload: Dictionary, result: int, response_code:
 	var parsed := _parse_json_dictionary(body.get_string_from_utf8())
 	if parsed.is_empty():
 		return _agent_plan_fallback(payload, "parse")
-	return _validate_agent_plan(parsed, payload, true, "remote_server")
+	var source := _response_source(parsed, "remote_server")
+	var parsed_ok := _response_counts_as_remote_success(source)
+	return _validate_agent_plan(parsed, payload, parsed_ok, source, str(parsed.get("failure_reason", "")))
 
 
 func _parse_fast_prediction_response(payload: Dictionary, result: int, response_code: int, body: PackedByteArray) -> Dictionary:
@@ -538,6 +543,16 @@ func _parse_fast_prediction_response(payload: Dictionary, result: int, response_
 	if parsed.is_empty():
 		return _validated_fallback("fast_prediction", payload)
 	return _validate_fast_prediction(parsed, payload)
+
+
+func _response_source(data: Dictionary, default_source := "remote_server") -> String:
+	var source := str(data.get("source", default_source)).strip_edges()
+	return source if source != "" else default_source
+
+
+func _response_counts_as_remote_success(source: String) -> bool:
+	var clean := source.strip_edges()
+	return clean == "remote_server" or clean == "validated_guardrail"
 
 
 func _cached_deep_interpretation(payload: Dictionary) -> Dictionary:
@@ -1364,6 +1379,7 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 	var body_alignment := {}
 	var evidence_ids: Array[String] = []
 	var active_plan = payload.get("active_plan", {})
+	var behavior_evidence := _behavior_evidence_array(payload.get("behavior_evidence", []), 3)
 	if typeof(active_plan) == TYPE_DICTIONARY:
 		var raw_next_action = active_plan.get("next_action", "")
 		if typeof(raw_next_action) == TYPE_DICTIONARY:
@@ -1378,6 +1394,9 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 	for snapshot in snapshots:
 		if typeof(snapshot) == TYPE_DICTIONARY:
 			snapshot_rows.append(snapshot)
+			for evidence in _behavior_evidence_array(snapshot.get("behavior_evidence", {}), 3):
+				if behavior_evidence.size() < 3:
+					behavior_evidence.append(evidence)
 	if not snapshot_rows.is_empty():
 		var latest: Dictionary = snapshot_rows[snapshot_rows.size() - 1]
 		var latest_ari = latest.get("ari", {})
@@ -1482,6 +1501,24 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 	var mistake_candidates: Array[String] = []
 	var opportunity_candidates: Array[String] = []
 	var lesson_candidates: Array[String] = []
+	for evidence in behavior_evidence:
+		if typeof(evidence) != TYPE_DICTIONARY:
+			continue
+		var pattern := str(evidence.get("primary_pattern", "")).strip_edges()
+		var neutral := str(evidence.get("neutral_summary", "")).strip_edges()
+		if neutral != "" and not facts.has(neutral):
+			facts.append(neutral)
+		if pattern != "":
+			if not world_changes.has(pattern):
+				world_changes.append(pattern)
+			if pattern == "repeated_action_switching" and not mistake_candidates.has("repeated switching happened without progress"):
+				mistake_candidates.append("repeated switching happened without progress")
+			var review_lesson := "review whether %s helped survival" % pattern
+			if not lesson_candidates.has(review_lesson):
+				lesson_candidates.append(review_lesson)
+		for evidence_id in _string_array(evidence.get("evidence_ids", []), 12, 120):
+			if not evidence_ids.has(evidence_id):
+				evidence_ids.append(evidence_id)
 	if plan_body_mismatch:
 		mistake_candidates.append("body action %s diverged from planned %s" % [_normalize_scribe_action_key(current_action), _normalize_scribe_action_key(planned_action)])
 		lesson_candidates.append("compare Ari's body action with the active plan before trusting the moment")
@@ -1530,6 +1567,7 @@ func _local_stub_scribe(payload: Dictionary) -> Dictionary:
 		"failure_reason": "local_fallback",
 		"origin": "deterministic_scribe",
 		"evidence_ids": evidence_ids,
+		"behavior_evidence": behavior_evidence,
 	}
 
 
@@ -2100,6 +2138,7 @@ func _validate_scribe_note(data: Dictionary) -> Dictionary:
 		"failure_reason": str(data.get("failure_reason", "")),
 		"origin": _limit_text(str(data.get("origin", "")), 80),
 		"evidence_ids": _string_array(data.get("evidence_ids", data.get("evidence_snapshot_ids", [])), 12, 120),
+		"behavior_evidence": _behavior_evidence_array(data.get("behavior_evidence", []), 3),
 	}
 
 
@@ -2297,6 +2336,7 @@ func _validate_strategy_packet(value) -> Dictionary:
 		"avoid_repeating": _string_array(data.get("avoid_repeating", []), 8, 140),
 		"try_next": _string_array(data.get("try_next", []), 8, 100),
 		"evidence": _string_array(data.get("evidence", []), 14, 180),
+		"behavior_evidence": _behavior_evidence_array(data.get("behavior_evidence", []), 3),
 		"confidence": clampf(float(data.get("confidence", 0.35)), 0.0, 1.0),
 	}
 
@@ -2371,6 +2411,7 @@ func _validate_library_reflection(data: Dictionary) -> Dictionary:
 		"reflection_id": _limit_text(str(data.get("reflection_id", "")), 120),
 		"summary_id": _limit_text(str(data.get("summary_id", "")), 120),
 		"evidence_ids": _string_array(data.get("evidence_ids", data.get("evidence_snapshot_ids", [])), 20, 120),
+		"behavior_evidence": _behavior_evidence_array(data.get("behavior_evidence", []), 3),
 	}
 
 
@@ -2486,6 +2527,67 @@ func _scribe_danger_array(value, max_count: int) -> Array:
 		if result.size() >= max_count:
 			break
 	return result
+
+
+func _behavior_evidence_array(value, max_count: int) -> Array:
+	var result := []
+	if typeof(value) == TYPE_DICTIONARY:
+		var evidence := _validate_behavior_evidence(value)
+		if not evidence.is_empty():
+			result.append(evidence)
+	elif typeof(value) == TYPE_ARRAY:
+		for item in value:
+			var evidence := _validate_behavior_evidence(item)
+			if evidence.is_empty():
+				continue
+			result.append(evidence)
+			if result.size() >= max_count:
+				break
+	return result
+
+
+func _validate_behavior_evidence(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {}
+	var pattern := _limit_text(str(value.get("primary_pattern", "")), 80)
+	if pattern == "":
+		return {}
+	var context = value.get("context", {})
+	var safe_context := {}
+	if typeof(context) == TYPE_DICTIONARY:
+		safe_context = {
+			"phase": _limit_text(str(context.get("phase", "")), 40),
+			"enemy_count_before": max(0, int(context.get("enemy_count_before", 0))),
+			"enemy_count_after": max(0, int(context.get("enemy_count_after", 0))),
+			"nearest_danger_changed": bool(context.get("nearest_danger_changed", false)),
+			"active_plan_changed": bool(context.get("active_plan_changed", false)),
+		}
+	var progress = value.get("progress_delta", {})
+	var safe_progress := {}
+	if typeof(progress) == TYPE_DICTIONARY:
+		safe_progress = {
+			"structures": int(progress.get("structures", 0)),
+			"stone": int(progress.get("stone", 0)),
+			"repairs": int(progress.get("repairs", 0)),
+			"kills": int(progress.get("kills", 0)),
+			"hp": int(progress.get("hp", 0)),
+		}
+	return {
+		"schema": "ari.behavior_evidence.v1",
+		"window_seconds": clampf(float(value.get("window_seconds", 0.0)), 0.0, 120.0),
+		"primary_pattern": pattern,
+		"actions_seen": _string_array(value.get("actions_seen", []), 8, 80),
+		"transition_count": max(0, int(value.get("transition_count", 0))),
+		"completion_count": max(0, int(value.get("completion_count", 0))),
+		"blocked_count": max(0, int(value.get("blocked_count", 0))),
+		"abandoned_count": max(0, int(value.get("abandoned_count", 0))),
+		"anchors_seen": _string_array(value.get("anchors_seen", []), 8, 80),
+		"anchor_transition_count": max(0, int(value.get("anchor_transition_count", 0))),
+		"progress_delta": safe_progress,
+		"context": safe_context,
+		"evidence_ids": _string_array(value.get("evidence_ids", []), 12, 120),
+		"neutral_summary": _limit_text(str(value.get("neutral_summary", "")), 220),
+	}
 
 
 func _doctrines(value) -> Array:
@@ -2612,7 +2714,7 @@ func _http_status_failure_reason(response_code: int) -> String:
 func _compact_failure_reason(reason: String) -> String:
 	var clean_reason := reason.strip_edges().to_lower()
 	match clean_reason:
-		"timeout", "parse", "auth", "offline", "request_canceled", "request_failed", "request_error", "missing_endpoint", "disabled", "invalid_action", "invalid_schema":
+		"timeout", "parse", "auth", "offline", "request_canceled", "request_failed", "request_error", "missing_endpoint", "disabled", "invalid_action", "invalid_schema", "model_timeout", "model_failed", "foreground_busy", "prediction_pending", "deterministic_deep", "deterministic_scribe", "local_fallback":
 			return clean_reason
 	if clean_reason.begins_with("http_"):
 		return clean_reason

@@ -4,7 +4,93 @@ extends RefCounted
 const MAX_DOCTRINES := 40
 const MAX_BIAS_KEYS := 16
 const MAX_PLAN_STEPS := 4
+const MAX_CONTROL_ACTIONS := 6
+const MAX_CONTROL_BREAK_REASONS := 6
 const MAX_OUTCOME_REASON := 160
+const CONTROL_ANCHOR_KINDS := [
+	"safest_defense",
+	"current_anchor",
+	"tower",
+	"aura",
+	"cover",
+	"wall",
+	"storm_rod",
+	"fear_lantern",
+	"decoy_idol",
+	"thorn_totem",
+	"repair_target",
+]
+const CONTROL_BREAK_REASONS := [
+	"danger_changed",
+	"anchor_destroyed",
+	"low_hp",
+	"enemy_too_close",
+	"anchor_invalid",
+	"plan_completed",
+	"resource_blocked",
+	"required_resource_missing",
+]
+const CONTROL_ACTION_IDS := [
+	"mine_stone",
+	"build_wall",
+	"wait_or_idle",
+	"use_existing_wall",
+	"wait_behind_wall",
+	"use_cover",
+	"place_aura_orb",
+	"lure_to_aura",
+	"train_combat",
+	"prepare_weapon",
+	"ranged_attack",
+	"use_tower",
+	"train_bow",
+	"farm_food",
+	"eat",
+	"eat_food",
+	"build_trap",
+	"build_spike_trap",
+	"build_tower",
+	"build_tar_pit",
+	"lure_to_tar_pit",
+	"build_fear_lantern",
+	"use_fear_lantern",
+	"build_decoy_idol",
+	"use_decoy_idol",
+	"build_thorn_totem",
+	"build_repair_bench",
+	"use_thorns",
+	"rest",
+	"reflect_library",
+	"repair",
+	"repair_structure",
+	"flee",
+	"fight",
+	"fight_head_on",
+	"train_sword",
+	"smith_sword",
+	"mine_ore",
+	"build_forge",
+	"use_armor",
+	"rely_on_regen",
+	"regen_on_kill",
+	"stall_until_dawn",
+	"hide_until_dawn",
+	"avoid_killing",
+	"survive_until_morning",
+	"kite",
+	"hide",
+	"build_storm_rod",
+	"anti_flying",
+	"sky_answer",
+	"anti_air_defense",
+	"mining",
+	"wall",
+	"aura_orb",
+	"combat_training",
+	"range",
+	"hold_best_defense",
+	"defensive_wait",
+]
 
 var doctrines: Array = []
 
@@ -112,6 +198,17 @@ func get_active_bias(context: Dictionary) -> Dictionary:
 			var action_id := str(key)
 			var value := clampf(float(bias[key]) * confidence, -1.0, 1.0)
 			result[action_id] = clampf(float(result.get(action_id, 0.0)) + value, -1.0, 1.0)
+		var control: Dictionary = doctrine.get("control", {})
+		if not control.is_empty():
+			if str(control.get("preferred_anchor_kind", "")).strip_edges() != "":
+				result["hold_best_defense"] = clampf(float(result.get("hold_best_defense", 0.0)) + (0.45 * confidence), -1.0, 1.0)
+			var avoid_actions = control.get("avoid_action_ids", [])
+			if typeof(avoid_actions) == TYPE_ARRAY:
+				for raw_action_id in avoid_actions:
+					var control_action_id := _normalize_id(str(raw_action_id))
+					if control_action_id == "":
+						continue
+					result[control_action_id] = clampf(float(result.get(control_action_id, 0.0)) - (0.35 * confidence), -1.0, 1.0)
 	return result
 
 
@@ -168,7 +265,8 @@ func _validate_doctrine(raw_doctrine: Dictionary) -> Dictionary:
 		return {}
 	var bias := _validate_bias(raw_doctrine.get("bias", {}))
 	var plan := _validate_plan(raw_doctrine.get("plan", []))
-	if bias.is_empty() and plan.is_empty():
+	var control := _validate_control(raw_doctrine.get("control", {}))
+	if bias.is_empty() and plan.is_empty() and control.is_empty():
 		return {}
 	var raw_id := str(raw_doctrine.get("id", raw_doctrine.get("title", "doctrine")))
 	return {
@@ -177,6 +275,7 @@ func _validate_doctrine(raw_doctrine: Dictionary) -> Dictionary:
 		"when": when,
 		"bias": bias,
 		"plan": plan,
+		"control": control,
 		"confidence": clampf(float(raw_doctrine.get("confidence", 1.0)), 0.0, 1.0),
 		"failure_count": maxi(int(raw_doctrine.get("failure_count", 0)), 0),
 		"success_count": maxi(int(raw_doctrine.get("success_count", 0)), 0),
@@ -194,7 +293,8 @@ func _doctrine_lessons_match(a: Dictionary, b: Dictionary) -> bool:
 		and str(a.get("summary", "")) == str(b.get("summary", "")) \
 		and a.get("when", {}) == b.get("when", {}) \
 		and a.get("bias", {}) == b.get("bias", {}) \
-		and a.get("plan", []) == b.get("plan", [])
+		and a.get("plan", []) == b.get("plan", []) \
+		and a.get("control", {}) == b.get("control", {})
 
 
 func _merge_doctrine(existing: Dictionary, incoming: Dictionary) -> Dictionary:
@@ -207,6 +307,8 @@ func _merge_doctrine(existing: Dictionary, incoming: Dictionary) -> Dictionary:
 	for key in ["source", "failure_reason", "origin", "reflection_id", "summary_id"]:
 		if str(merged.get(key, "")).strip_edges() == "" and str(existing.get(key, "")).strip_edges() != "":
 			merged[key] = existing.get(key)
+	if existing.has("control") and (not merged.has("control") or merged.get("control", {}).is_empty()):
+		merged["control"] = existing.get("control")
 	var evidence_ids := _string_array(merged.get("evidence_ids", []), 20, 120)
 	for item in _string_array(existing.get("evidence_ids", []), 20, 120):
 		if not evidence_ids.has(item):
@@ -251,6 +353,15 @@ func _validate_when(value) -> Dictionary:
 			var destroyed_text := _limit_text(str(destroyed), 60)
 			if destroyed_text != "":
 				result["structure_destroyed"] = destroyed_text
+	var behavior_pattern := ""
+	if value.has("behavior_pattern"):
+		behavior_pattern = _limit_text(str(value.get("behavior_pattern", "")), 80)
+	elif value.has("pattern"):
+		behavior_pattern = _limit_text(str(value.get("pattern", "")), 80)
+	if behavior_pattern != "":
+		result["behavior_pattern"] = behavior_pattern
+	if value.has("danger_changed"):
+		result["danger_changed"] = bool(value.get("danger_changed", false))
 	return result
 
 
@@ -296,6 +407,42 @@ func _validate_plan(value) -> Array:
 	return result
 
 
+func _validate_control(value) -> Dictionary:
+	var result := {}
+	if typeof(value) != TYPE_DICTIONARY:
+		return result
+	var anchor := _normalize_id(str(value.get("preferred_anchor_kind", value.get("anchor_kind", value.get("preferred_anchor", "")))))
+	if CONTROL_ANCHOR_KINDS.has(anchor):
+		result["preferred_anchor_kind"] = anchor
+	if value.has("min_hold_seconds"):
+		result["min_hold_seconds"] = clampf(float(value.get("min_hold_seconds", 0.0)), 3.0, 45.0)
+	var avoid_actions := []
+	var raw_avoid_actions = value.get("avoid_action_ids", value.get("avoid_actions", []))
+	if typeof(raw_avoid_actions) == TYPE_ARRAY:
+		for raw_action in raw_avoid_actions:
+			var action_id := _normalize_id(str(raw_action))
+			if not CONTROL_ACTION_IDS.has(action_id) or avoid_actions.has(action_id):
+				continue
+			avoid_actions.append(action_id)
+			if avoid_actions.size() >= MAX_CONTROL_ACTIONS:
+				break
+	if not avoid_actions.is_empty():
+		result["avoid_action_ids"] = avoid_actions
+	var break_reasons := []
+	var raw_break_reasons = value.get("allowed_break_reasons", value.get("break_reasons", []))
+	if typeof(raw_break_reasons) == TYPE_ARRAY:
+		for raw_reason in raw_break_reasons:
+			var reason_id := _normalize_id(str(raw_reason))
+			if not CONTROL_BREAK_REASONS.has(reason_id) or break_reasons.has(reason_id):
+				continue
+			break_reasons.append(reason_id)
+			if break_reasons.size() >= MAX_CONTROL_BREAK_REASONS:
+				break
+	if not break_reasons.is_empty():
+		result["allowed_break_reasons"] = break_reasons
+	return result
+
+
 func _matches_context(doctrine: Dictionary, context: Dictionary) -> bool:
 	var when: Dictionary = doctrine.get("when", {})
 	if when.has("enemy_type_present"):
@@ -309,6 +456,10 @@ func _matches_context(doctrine: Dictionary, context: Dictionary) -> bool:
 	if when.has("max_hp_ratio") and clampf(float(context.get("ari_hp_ratio", 1.0)), 0.0, 1.0) > float(when.get("max_hp_ratio", 1.0)):
 		return false
 	if when.has("structure_destroyed") and not _matches_structure_destroyed(when.get("structure_destroyed"), context):
+		return false
+	if when.has("behavior_pattern") and not _matches_behavior_pattern(str(when.get("behavior_pattern", "")), context):
+		return false
+	if when.has("danger_changed") and bool(context.get("danger_changed", false)) != bool(when.get("danger_changed", false)):
 		return false
 	return true
 
@@ -358,6 +509,26 @@ func _matches_structure_destroyed(predicate, context: Dictionary) -> bool:
 	return false
 
 
+func _matches_behavior_pattern(pattern: String, context: Dictionary) -> bool:
+	if pattern == "":
+		return false
+	if str(context.get("behavior_pattern", "")) == pattern:
+		return true
+	var patterns = context.get("behavior_patterns", [])
+	if typeof(patterns) == TYPE_ARRAY:
+		for item in patterns:
+			if str(item) == pattern:
+				return true
+	var evidence_items = context.get("behavior_evidence", [])
+	if typeof(evidence_items) == TYPE_ARRAY:
+		for evidence in evidence_items:
+			if typeof(evidence) == TYPE_DICTIONARY and str(evidence.get("primary_pattern", "")) == pattern:
+				return true
+	elif typeof(evidence_items) == TYPE_DICTIONARY and str(evidence_items.get("primary_pattern", "")) == pattern:
+		return true
+	return false
+
+
 func _feedback_delta(outcome: String) -> float:
 	var normalized := _normalize_id(outcome)
 	match normalized:
@@ -390,6 +561,12 @@ func _doctrine_mentions_action(doctrine: Dictionary, action_id: String) -> bool:
 		var step_action := _normalize_id(str(step.get("affordance_id", step.get("action_id", ""))))
 		if _actions_equivalent(step_action, action_id):
 			return true
+	var control: Dictionary = doctrine.get("control", {})
+	var avoid_actions = control.get("avoid_action_ids", [])
+	if typeof(avoid_actions) == TYPE_ARRAY:
+		for raw_action in avoid_actions:
+			if _actions_equivalent(_normalize_id(str(raw_action)), action_id):
+				return true
 	return false
 
 

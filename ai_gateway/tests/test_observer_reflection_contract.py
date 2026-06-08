@@ -120,6 +120,29 @@ def test_scribe_endpoint_deterministic_mode_skips_model_and_returns_structured_n
     assert raw["lesson_candidates"]
 
 
+def test_scribe_endpoint_preserves_behavior_evidence_without_prescribing_fix(monkeypatch):
+    payload = _scribe_payload()
+    payload["recent_events"] = []
+    payload["snapshots"] = [_behavior_snapshot()]
+    payload["behavior_evidence"] = [_behavior_evidence()]
+    main.app.dependency_overrides[main.get_settings] = lambda: Settings(scribe_mode="deterministic")
+    try:
+        response = TestClient(main.app).post("/scribe", json={"payload": payload})
+    finally:
+        main.app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    raw = response.json()["raw"]
+    assert raw["schema"] == "ari.scribe.note.v2"
+    assert raw["behavior_evidence"][0]["primary_pattern"] == "repeated_action_switching"
+    assert raw["behavior_evidence"][0]["anchors_seen"] == ["wall_alpha", "tower_alpha"]
+    assert raw["behavior_evidence"][0]["anchor_transition_count"] == 3
+    assert "switched between" in " ".join(raw["facts"]).lower()
+    assert "repeated_action_switching" in raw["world_changes"]
+    assert "build_wall" not in raw["priority_hints"]
+    assert not any("finish" in item.lower() for item in raw["lesson_candidates"])
+
+
 def test_deterministic_scribe_preserves_recent_flying_evidence_when_latest_snapshot_is_different():
     flying_snapshot = _observer_snapshot()
     flying_snapshot["snapshot_id"] = "snap_flying_01"
@@ -582,6 +605,69 @@ def test_library_reflection_prompt_is_summary_first_and_compact():
     assert len(prompt) < 1800
 
 
+def test_library_reflection_prompt_includes_behavior_evidence_for_llm_judgment():
+    payload = _behavior_reflection_payload()
+    prompt = library_reflection_user_prompt(BridgePayloadRequest(payload=payload))
+
+    assert "Behavior evidence:" in prompt
+    assert "repeated_action_switching" in prompt
+    assert "switched between" in prompt
+    assert "decide whether behavior evidence was useful adaptation" in prompt
+    assert len(prompt) < 2100
+
+
+def test_library_reflection_sanitizes_behavior_pattern_doctrine_from_model(monkeypatch):
+    async def fake_call_library_reflection_model(request, settings):
+        assert request.payload["behavior_evidence"][0]["primary_pattern"] == "repeated_action_switching"
+        return {
+            "schema": "ari.night_reflection.v1",
+            "title": "Hold One Thread",
+            "markdown": "# Hold One Thread\n\nAri switched tasks without progress.",
+            "hypothesis": "Stable danger made repeated switching waste preparation.",
+            "lesson": "When repeated_action_switching appears and danger did not change, keep one legal defense step long enough to complete it.",
+            "priority_bias": {"build_wall": 0.22, "repair_structure": -0.06, "use_cover": -0.04},
+            "doctrines": [{
+                "id": "reflection_finish_defense_before_switching",
+                "summary": "When repeated switching happens without changed danger, keep one legal defense step long enough.",
+                "when": {"behavior_pattern": "repeated_action_switching", "danger_changed": False},
+                "bias": {"build_wall": 0.22, "repair_structure": -0.06, "use_cover": -0.04},
+                "plan": [{"affordance_id": "build_wall", "priority": 0.62, "reason": "LLM reflection chose a legal defense step."}],
+                "control": {
+                    "preferred_anchor_kind": "safest_defense",
+                    "min_hold_seconds": 14,
+                    "avoid_action_ids": ["train_combat", "spawn_dragon"],
+                    "allowed_break_reasons": ["danger_changed", "anchor_destroyed", "model_said_so"],
+                },
+                "confidence": 0.42,
+            }],
+            "confidence": 0.55,
+        }
+
+    monkeypatch.setattr(main, "call_library_reflection_model", fake_call_library_reflection_model, raising=False)
+    response = TestClient(main.app).post("/library-reflection", json={"payload": _behavior_reflection_payload()})
+
+    assert response.status_code == 200
+    raw = response.json()["raw"]
+    doctrine = raw["doctrines"][0]
+    assert doctrine["id"] == "reflection_finish_defense_before_switching"
+    assert doctrine["when"] == {"behavior_pattern": "repeated_action_switching", "danger_changed": False}
+    assert doctrine["plan"][0]["affordance_id"] == "build_wall"
+    assert doctrine["bias"]["repair_structure"] < 0
+    assert doctrine["control"]["preferred_anchor_kind"] == "safest_defense"
+    assert doctrine["control"]["min_hold_seconds"] == 14
+    assert doctrine["control"]["avoid_action_ids"] == ["train_combat"]
+    assert doctrine["control"]["allowed_break_reasons"] == ["danger_changed", "anchor_destroyed"]
+
+
+def test_fallback_library_reflection_does_not_invent_behavior_doctrine():
+    raw = main.fallback_library_reflection_response(_behavior_reflection_payload())
+
+    assert raw["schema"] == "ari.night_reflection.v1"
+    assert raw["source"] == "local_fallback"
+    assert not any("switch" in doctrine["id"] for doctrine in raw["doctrines"])
+    assert not any("oscillat" in doctrine["id"] for doctrine in raw["doctrines"])
+
+
 def test_library_reflection_endpoint_falls_back_on_model_failure(monkeypatch):
     async def fake_call_library_reflection_model(request, settings):
         raise RuntimeError("timeout")
@@ -737,6 +823,86 @@ def _scribe_payload():
         "recent_events": [{"type": "enemy_spawned", "enemy_type": "flying", "day": 3, "phase": "day"}],
         "snapshots": [_observer_snapshot()],
         "max_words": 35,
+    }
+
+
+def _behavior_evidence():
+    return {
+        "schema": "ari.behavior_evidence.v1",
+        "window_seconds": 45.0,
+        "primary_pattern": "repeated_action_switching",
+        "actions_seen": ["build_wall", "repair_structure", "use_cover"],
+        "transition_count": 6,
+        "completion_count": 0,
+        "blocked_count": 1,
+        "abandoned_count": 4,
+        "anchors_seen": ["wall_alpha", "tower_alpha"],
+        "anchor_transition_count": 3,
+        "progress_delta": {"structures": 0, "stone": -2, "repairs": 0, "kills": 0, "hp": 0},
+        "context": {
+            "phase": "midday",
+            "enemy_count_before": 0,
+            "enemy_count_after": 0,
+            "nearest_danger_changed": False,
+            "active_plan_changed": False,
+        },
+        "evidence_ids": ["day2_0421_action_switch", "day2_0430_action_switch"],
+        "neutral_summary": "Ari switched between build_wall, repair_structure, and use_cover 6 times in 45 seconds; no build or repair completed.",
+    }
+
+
+def _behavior_snapshot():
+    snapshot = _observer_snapshot()
+    snapshot["snapshot_id"] = "day2_0421_behavior"
+    snapshot["phase"] = "midday"
+    snapshot["ari"]["current_job"] = "build_wall"
+    snapshot["ari"]["current_action"] = "build_wall"
+    snapshot["ari"]["current_reason"] = "Ari returned to wall work after leaving repair."
+    snapshot["plan"]["next_action"] = "build_wall"
+    snapshot["world"]["enemies"] = {"count": 0, "types": {}}
+    snapshot["world"]["nearest_danger"] = {"type": "none", "distance": -1.0}
+    snapshot["world"]["notable_changes"] = ["repeated_action_switching"]
+    snapshot["behavior_evidence"] = _behavior_evidence()
+    return snapshot
+
+
+def _behavior_reflection_payload():
+    evidence = _behavior_evidence()
+    return {
+        "schema": "ari.night_reflection.request.v2",
+        "trigger": "dawn_survived",
+        "day": 2,
+        "outcome": "survived",
+        "sign": {"text": "make the walls ready before night", "interpretation": "prepare defenses"},
+        "snapshots": [_behavior_snapshot()],
+        "day_summary": {
+            "schema": "ari.day_summary.v1",
+            "day": 2,
+            "outcome": "survived",
+            "timeline": ["Ari switched between defensive tasks without completing one."],
+            "what_changed": ["repeated_action_switching"],
+            "worked": [],
+            "went_wrong": ["repeated switching happened without progress"],
+            "misunderstood": [],
+            "behavior_patterns": ["repeated_action_switching"],
+            "behavior_evidence": [evidence],
+            "candidate_lessons": ["review whether repeated switching helped survival"],
+            "evidence_snapshot_ids": evidence["evidence_ids"],
+        },
+        "recent_events": [{"type": "behavior_pattern_observed", "pattern": "repeated_action_switching"}],
+        "scribe_notes": [{
+            "note": evidence["neutral_summary"],
+            "facts": [evidence["neutral_summary"]],
+            "world_changes": ["repeated_action_switching"],
+            "behavior_evidence": [evidence],
+            "lesson_candidates": ["review whether repeated switching helped survival"],
+            "salience": 0.85,
+        }],
+        "behavior_evidence": [evidence],
+        "active_doctrines": [],
+        "agent_plan_outcomes": [],
+        "latest_lifetime_notes": [],
+        "max_words": 160,
     }
 
 

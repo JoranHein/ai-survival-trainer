@@ -67,6 +67,7 @@ func _validate_scribe_note(note: Dictionary) -> Dictionary:
 		"failure_reason": _limit_text(str(note.get("failure_reason", "")), 64),
 		"origin": _limit_text(str(note.get("origin", "")), 80),
 		"evidence_ids": _string_array(note.get("evidence_ids", note.get("evidence_snapshot_ids", [])), 12, 120),
+		"behavior_evidence": _behavior_evidence_array(note.get("behavior_evidence", []), 3),
 	}
 
 
@@ -158,6 +159,67 @@ func _priority_hints(value) -> Dictionary:
 	return result
 
 
+func _behavior_evidence_array(value, max_count: int) -> Array:
+	var result := []
+	if typeof(value) == TYPE_DICTIONARY:
+		var evidence := _behavior_evidence(value)
+		if not evidence.is_empty():
+			result.append(evidence)
+	elif typeof(value) == TYPE_ARRAY:
+		for item in value:
+			var evidence := _behavior_evidence(item)
+			if evidence.is_empty():
+				continue
+			result.append(evidence)
+			if result.size() >= max_count:
+				break
+	return result
+
+
+func _behavior_evidence(value) -> Dictionary:
+	if typeof(value) != TYPE_DICTIONARY:
+		return {}
+	var pattern := _limit_text(str(value.get("primary_pattern", "")), 80)
+	if pattern == "":
+		return {}
+	var context = value.get("context", {})
+	var safe_context := {}
+	if typeof(context) == TYPE_DICTIONARY:
+		safe_context = {
+			"phase": _limit_text(str(context.get("phase", "")), 40),
+			"enemy_count_before": max(0, int(context.get("enemy_count_before", 0))),
+			"enemy_count_after": max(0, int(context.get("enemy_count_after", 0))),
+			"nearest_danger_changed": bool(context.get("nearest_danger_changed", false)),
+			"active_plan_changed": bool(context.get("active_plan_changed", false)),
+		}
+	var progress = value.get("progress_delta", {})
+	var safe_progress := {}
+	if typeof(progress) == TYPE_DICTIONARY:
+		safe_progress = {
+			"structures": int(progress.get("structures", 0)),
+			"stone": int(progress.get("stone", 0)),
+			"repairs": int(progress.get("repairs", 0)),
+			"kills": int(progress.get("kills", 0)),
+			"hp": int(progress.get("hp", 0)),
+		}
+	return {
+		"schema": "ari.behavior_evidence.v1",
+		"window_seconds": clampf(float(value.get("window_seconds", 0.0)), 0.0, 120.0),
+		"primary_pattern": pattern,
+		"actions_seen": _string_array(value.get("actions_seen", []), 8, 80),
+		"transition_count": max(0, int(value.get("transition_count", 0))),
+		"completion_count": max(0, int(value.get("completion_count", 0))),
+		"blocked_count": max(0, int(value.get("blocked_count", 0))),
+		"abandoned_count": max(0, int(value.get("abandoned_count", 0))),
+		"anchors_seen": _string_array(value.get("anchors_seen", []), 8, 80),
+		"anchor_transition_count": max(0, int(value.get("anchor_transition_count", 0))),
+		"progress_delta": safe_progress,
+		"context": safe_context,
+		"evidence_ids": _string_array(value.get("evidence_ids", []), 12, 120),
+		"neutral_summary": _limit_text(str(value.get("neutral_summary", "")), 220),
+	}
+
+
 func _print_structured_scribe_log(note: Dictionary) -> void:
 	if OS.get_environment("ARI_SCRIBE_LOG").strip_edges() != "1":
 		return
@@ -180,6 +242,7 @@ func _print_structured_scribe_log(note: Dictionary) -> void:
 		"source": note.get("source", ""),
 		"origin": note.get("origin", ""),
 		"evidence_ids": note.get("evidence_ids", []),
+		"behavior_evidence": note.get("behavior_evidence", []),
 		"confidence": note.get("confidence", 0.0),
 	}
 	print("SCRIBE ", JSON.stringify(payload))
